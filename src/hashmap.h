@@ -370,10 +370,10 @@ public:
     };
 
     Tuple lookup(Key const &key) const& { // return type from lookup is "const&" ?
-        DState htl = *(ht->load(std::memory_order_relaxed));
-        std::size_t hashed_key = std::hash<Key>(key); // we will use std hash for now
-        BState bs = htl.dir[hashed_key];
-        for (Triple *t : bs.items) {
+        DState *htl = (ht.load(std::memory_order_relaxed));
+        std::size_t hashed_key = std::hash<Key>{}(key); // we will use std hash for now
+        BState *bs = htl->dir[hashed_key]->state.load(std::memory_order_relaxed);
+        for (Triple *t : bs->items) {
             if (t->key == key) return {true, t->value};
         }
         return {false, 0}; // TODO: fix (detailed at the doc form)
@@ -382,7 +382,7 @@ public:
 
     enum Status_type insert(Key const &key, Value const &value, unsigned int id) {
 
-        std::size_t hashed_key = std::hash<Key>(key); // TODO: fix hash
+        std::size_t hashed_key = std::hash<Key>{}(key); // TODO: fix hash
         help[id] = new Operation(INS, key, value, ++opSeqnum[id], hashed_key);
         DState *htl = (ht.load(std::memory_order_relaxed));
         size_t hash_prefix =  Prefix(hashed_key, htl->getDepth());
