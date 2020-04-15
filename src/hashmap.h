@@ -17,6 +17,7 @@
 #include <atomic>
 #include <cassert>
 
+
 template<typename Key, typename Value>
 class hashmap {
     // private:
@@ -51,8 +52,10 @@ class hashmap {
         int seqnum;
     };
 
-    class BigWord {
+    struct BigWord {
         uint8_t Data[BIGWORD_SIZE];
+
+    public:
         BigWord() : Data() {}
 
         BigWord(BigWord const& b) : Data() {
@@ -78,7 +81,7 @@ class hashmap {
         }
     };
 
-    class BState {
+    struct BState {
         Triple *items[BUCKET_SIZE]; // if pointer = nullptr place is free
         Result results[NUMBER_OF_THREADS]; // array size n
         BigWord applied{}; // bit array of size 128
@@ -119,7 +122,7 @@ class hashmap {
         ~BState() = default;
     };
 
-    class Bucket {
+    struct Bucket {
         int prefix;
         size_t depth;
         volatile std::atomic<BState*> state; //TODO: volatile means un-cacheable this is the CAS API demands, but maybe we can find a better CAS that doesn't require this since this is more exspensive
@@ -137,19 +140,24 @@ class hashmap {
         ~Bucket() = default;
     };
 
-    class DState {
+    struct DState {
         size_t depth;
         Bucket *dir[];  // allocated array with size 2^depth
 
-        size_t getDepth(){
-            return depth;
-        }
     public:
         explicit DState(size_t depth) : depth(depth){
             assert(0 < depth && depth < 20);
             dir = new Bucket*[POW(depth)]();
             // instead of including <cmath> used quick power trick "<<"
             // auto initiated with nullptr
+        }
+
+        size_t getDepth(){
+            return depth;
+        }
+
+        Bucket getDir(){
+            return dir;
         }
 
         DState(const DState &b) = delete; // we can implement copy constructor if we will need to, but it cannot be the default so for now so it's blocked
@@ -190,17 +198,17 @@ class hashmap {
         return NOT_FOUND;
     }
 
-    void ApplyWFOp(Bucket &b, unsigned int id) {
+    void ApplyWFOp(Bucket *b, unsigned int id) {
         std::atomic<BState*> newBState_atomic;
         BigWord oldToggle;
         BState *oldBState, *newBState;
 
-        b.toggle.setBit(id); // mark as worked on by thread id
+        b->toggle.setBit(id); // mark as worked on by thread id
 
         for(int i = 0; i < 2; i++) {
-            oldBState = b.state->load(std::memory_order_relaxed); // this is the most efficient access, it is suppose to work since the algo already covers all the cases
+            oldBState = b->state->load(std::memory_order_relaxed); // this is the most efficient access, it is suppose to work since the algo already covers all the cases
             newBState = new BState(oldBState);
-            oldToggle = b.toggle;
+            oldToggle = b->toggle;
 
             for(unsigned int j = 0; (j < NUMBER_OF_THREADS) && (oldToggle.testBit(j) != oldBState->applied.testBit(j)); j++) {
                 if(newBState->results[j].seqnum < help[j]->seqnum) {
@@ -376,15 +384,19 @@ public:
 
         std::size_t hashed_key = std::hash<Key>(key); // TODO: fix hash
         help[id] = new Operation(INS, key, value, ++opSeqnum[id], hashed_key);
-        DState htl = (ht->load(std::memory_order_relaxed));
-        size_t hash_prefix =  Prefix(hashed_key, htl.getDepth());
+        DState *htl = (ht.load(std::memory_order_relaxed));
+        size_t hash_prefix =  Prefix(hashed_key, htl->getDepth());
 
-        ApplyWFOp(htl.dir[hashed_key]);
-        htl = *(ht->load(std::memory_order_relaxed));
-        if (htl.dir[hash_prefix].state->results[id].seqnum != opSeqnum[id])
+
+        ApplyWFOp(htl->dir[Prefix(hashed_key, htl->getDepth())], id);
+        htl = (ht.load(std::memory_order_relaxed));
+        BState *bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
+
+        if (bstate->results[id].seqnum != opSeqnum[id])
             ResizeWF();
-        htl = *(ht->load(std::memory_order_relaxed));
-        return htl.dir[hash_prefix].state->results[id].status;
+        htl = (ht.load(std::memory_order_relaxed));
+        bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
+        return bstate->results[id].status;
     }
 
 
