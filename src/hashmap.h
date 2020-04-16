@@ -35,8 +35,7 @@ class hashmap {
         TRUE, FALSE, FAIL
     };
 
-    class Operation {
-    public:
+    struct Operation {
         Op_type type;
         Key key;
         Value value;
@@ -64,7 +63,10 @@ class hashmap {
             }
         }
 
-        BigWord operator=(BigWord b) = delete;
+        BigWord operator=(BigWord b){
+            BigWord big(b);
+            return big;
+        }
 
         ~BigWord() = default;
 
@@ -84,7 +86,7 @@ class hashmap {
     struct BState {
         Triple *items[BUCKET_SIZE]; // if pointer = nullptr place is free
         Result results[NUMBER_OF_THREADS]; // array size n
-        BigWord applied{}; // bit array of size 128
+        BigWord *applied; // bit array of size 128
 
     public:
         BState() : items(), results(), applied() {}
@@ -97,7 +99,7 @@ class hashmap {
             for(int i = 0; i < NUMBER_OF_THREADS; i++)
                 this->results[i] = b.results[i];
 
-            this->applied(b.applied);
+            applied = new BigWord(*b.applied);
         }
         BState operator=(BState b) = delete; // we can implement assignment constructor if we will need to, but it cannot be the default so for now so it's blocked
 
@@ -119,6 +121,14 @@ class hashmap {
             return FULL_BUCKET;
         }
 
+        int existInBucket(Triple const& c) {
+            for(int i = 0; i < BUCKET_SIZE; i++) {
+                if (c.key == items[i]->key)
+                    return i;
+            }
+            return NOT_FOUND;
+        }
+
         ~BState() = default;
     };
 
@@ -132,8 +142,10 @@ class hashmap {
         Bucket() : prefix(), depth(), state(std::atomic<int>(new BState())), toggle() {}
 
         Bucket(const Bucket &b) : prefix(b.prefix), depth(b.depth),
-            state(std::atomic<BState*>(new BState(*(b->state->load(std::memory_order_relaxed))))),
-            toggle(b.toggle) { } // copy constructor
+            state(std::atomic<BState*>(new BState(*(b.state.load(std::memory_order_relaxed))))),
+            toggle(b.toggle) {} // copy constructor
+
+        Bucket(int p, size_t d, volatile std::atomic<BState*> s, BigWord t) : prefix(p), depth(d), state(s), toggle(t){}
 
         Bucket operator=(Bucket b) = delete; // we can implement assignment constructor if we will need to, but it cannot be the default so for now so it's blocked
 
@@ -142,12 +154,12 @@ class hashmap {
 
     struct DState {
         size_t depth;
-        Bucket *dir[];  // allocated array with size 2^depth
+        Bucket **dir;  // allocated array with size 2^depth
 
     public:
         explicit DState(size_t depth) : depth(depth){
             assert(0 < depth && depth < 20);
-            dir = new Bucket*[POW(depth)]();
+            dir = new Bucket*[POW(depth)];
             // instead of including <cmath> used quick power trick "<<"
             // auto initiated with nullptr
         }
@@ -160,7 +172,12 @@ class hashmap {
             return dir;
         }
 
-        DState(const DState &b) = delete; // we can implement copy constructor if we will need to, but it cannot be the default so for now so it's blocked
+        DState(const DState &b) : depth(b.depth){
+            dir = new Bucket*[POW(depth)];
+            for(int i = 0; i < POW(depth); i++){
+                dir[i] = new Bucket(*b.dir[i]);
+            }
+        }
 
         DState operator=(DState b) = delete; // we can implement assignment constructor if we will need to, but it cannot be the default so for now so it's blocked
 
@@ -190,27 +207,20 @@ class hashmap {
 
     /*** Inner function section goes below: ***/
 
-    int existInBucket(Triple* const items[], Triple const& c) {
-        for(int i = 0; i < BUCKET_SIZE; i++) {
-            if (c.key == *items[i].key)
-                return i;
-        }
-        return NOT_FOUND;
-    }
 
     void ApplyWFOp(Bucket *b, unsigned int id) {
         std::atomic<BState*> newBState_atomic;
-        BigWord oldToggle;
+        BigWord *oldToggle;
         BState *oldBState, *newBState;
 
         b->toggle.setBit(id); // mark as worked on by thread id
 
         for(int i = 0; i < 2; i++) {
-            oldBState = b->state->load(std::memory_order_relaxed); // this is the most efficient access, it is suppose to work since the algo already covers all the cases
-            newBState = new BState(oldBState);
-            oldToggle = b->toggle;
+            oldBState = b->state.load(std::memory_order_relaxed); // this is the most efficient access, it is suppose to work since the algo already covers all the cases
+            newBState = new BState(*oldBState, true);
+            oldToggle = new BigWord(b->toggle);
 
-            for(unsigned int j = 0; (j < NUMBER_OF_THREADS) && (oldToggle.testBit(j) != oldBState->applied.testBit(j)); j++) {
+            for(unsigned int j = 0; (j < NUMBER_OF_THREADS) && (oldToggle->testBit(j) != oldBState->applied->testBit(j)); j++) {
                 if(newBState->results[j].seqnum < help[j]->seqnum) {
                     newBState->results[j].status = ExecOnBucket(newBState, *help[j]);
                     if(newBState->results[j].status != FAIL)
@@ -219,9 +229,9 @@ class hashmap {
             }
 
             newBState->applied = oldToggle;
-            newBState_atomic.store(newBState, std::memory_order_relaxed); //TODO: Not sure this is the the right way to store
+            newBState_atomic.store(newBState, std::memory_order_relaxed);
 
-            if (std::atomic_compare_exchange_weak<BState*>(oldBState, oldBState,  newBState_atomic))
+            if (std::atomic_compare_exchange_weak<BState*>(&b->state, &oldBState,  newBState))
                 delete oldBState;
             else
                 delete newBState;
@@ -232,45 +242,41 @@ class hashmap {
         int updateID = 0;
         int freeID = 0;
         Triple *temp;
-        auto *c = new Triple; //TODO: new throws exceptions? Maybe create a class for couple to make this cleaner
-        c->value = new Value;
-        *c->value = op.value;
+        auto *c = new Triple; //can create a more elegant c'tor
+
+        c->value = op.value;
         c->key = op.key;
+        c->hash = op.hash;
 
         freeID = (b->BucketFull());
         if (freeID == FULL_BUCKET) {
-            delete c->value;
             delete c;
             return FAIL;
         }
 
         else {
-            updateID = existInBucket(b->items, c);
+            updateID = b->existInBucket(*c);
             if (updateID == NOT_FOUND) {
                 if (op.type == INS) {
-                    temp = b->items[freeID];
                     b->items[freeID] = c;
-                    delete temp->value;
-                    delete temp;
                 }
             }
             else {
                 if(op.type == INS) {
                     temp = b->items[updateID];
                     b->items[updateID] = c;
-                    delete temp->value;
                     delete temp;
                 }
-                else {
-                    delete b->items[updateID].value;
-                    b->items[updateID].value = nullptr;
+                if(op.type == DEL) {
+                    delete b->items[updateID];
+                    b->items[updateID] = nullptr;
                 }
             }
         }
     }
 
-    Bucket *SplitBucket(Bucket const &b) { // returns 2 new Buckets
-        const BState bs = *(b.state->load(std::memory_order_relaxed));
+    const Bucket *SplitBucket(Bucket const &b) { // returns 2 new Buckets
+        const BState bs = *(b.state.load(std::memory_order_relaxed));
         // init 2 new Buckets:
         Bucket const *res = new Bucket*[2];
         BState const *bs0 = new BState(bs, false); // copy constructor without items
@@ -307,17 +313,17 @@ class hashmap {
     bool ApplyPendingResize(DState &d, Bucket const& bFull) {
         for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
             if (help[j] && Prefix(help[j]->key, bFull.depth) == bFull.prefix) {
-                BState const& bs = *(bFull.state->load(std::memory_order_relaxed));
+                BState const& bs = *(bFull.state.load(std::memory_order_relaxed));
                 if (bs.results[j].seqnum < help[j]->seqnum) {
                     Bucket *bDest = d.dir[Prefix(help[j]->key, d.depth)];
-                    BState *bsDest = bDest->state->load(std::memory_order_relaxed);
+                    BState *bsDest = bDest->state.load(std::memory_order_relaxed);
                     while (bsDest->BucketFull()) {
-                        Bucket splitted[2] = SplitBucket(bDest);
+                        Bucket *splitted = SplitBucket(*bDest); // TODO: is that what you meant?
                         DirectoryUpdate(d, splitted);
                         bDest = d.dir[Prefix(help[j]->key, d.depth)];
-                        bsDest = bDest->state->load(std::memory_order_relaxed);
+                        bsDest = bDest->state.load(std::memory_order_relaxed);
                     }
-                    bsDest->results[j].status = ExecOnBucket(bDest, help[j]);
+                    bsDest->results[j].status = ExecOnBucket(bsDest, *help[j]);
                     bsDest->results[j].seqnum = help[j]->seqnum;
                 }
             }
@@ -326,18 +332,23 @@ class hashmap {
 
     bool ResizeWF() {
         for (int k = 0; k < 2; ++k) {
-            DState *oldD = ht->load(std::memory_order_relaxed);
-            DState const *newD = new DState(*oldD);
+            DState *oldD = ht.load(std::memory_order_relaxed);
+            auto *newD = new DState(*oldD);
+            std::atomic<DState*> newDState_atomic;
+            std::atomic<DState*> oldDState_atomic;
+
             for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
                 if (help[j]) {
                     Bucket *b = newD->dir[Prefix(help[j]->hash, newD->depth)];
-                    BState &bs = *(b->state->load(std::memory_order_relaxed));
-                    if (bs.BucketFull() && bs.results[j].seqnum < help[j]->seqnum) {
-                        ApplyPendingResize(newD, *b);
+                    BState *bs = (b->state.load(std::memory_order_relaxed));
+                    if (bs->BucketFull() && bs->results[j].seqnum < help[j]->seqnum) {
+                        ApplyPendingResize(*newD, *b);
                     }
                 }
             }
-            if (std::atomic_compare_exchange_weak<DState*>(ht, oldD,  newD))
+
+
+            if (std::atomic_compare_exchange_weak<DState*>(&ht, &oldD,  newDState_atomic))
                 delete oldD;
             else
                 delete newD;
@@ -353,13 +364,15 @@ class hashmap {
 
 
 public:
-    hashmap() : ht(std::atomic<DState*>(new DState(1))), help(), opSeqnum() {};
+    hashmap() :  help(), opSeqnum() {
+        ht.store(new DState(1), std::memory_order_relaxed);
+    };
     hashmap(hashmap&) = delete;
     hashmap operator=(hashmap) = delete;
 
 
     ~hashmap() {
-        DState* d = *(ht->load(std::memory_order_relaxed));
+        DState* d = (ht.load(std::memory_order_relaxed));
         // TODO: delete all the buckets and...
         delete d;
     }
@@ -376,7 +389,7 @@ public:
         for (Triple *t : bs->items) {
             if (t->key == key) return {true, t->value};
         }
-        return {false, 0}; // TODO: fix (detailed at the doc form)
+        return {false, 0};
     }
 
 
@@ -388,7 +401,7 @@ public:
         size_t hash_prefix =  Prefix(hashed_key, htl->getDepth());
 
 
-        ApplyWFOp(htl->dir[Prefix(hashed_key, htl->getDepth())], id);
+        ApplyWFOp(htl->dir[hash_prefix], id);
         htl = (ht.load(std::memory_order_relaxed));
         BState *bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
 
