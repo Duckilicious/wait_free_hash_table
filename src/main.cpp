@@ -12,7 +12,7 @@ struct thread_data {
     int number_of_items_to_enter;
 };
 
-void *test1_thread(void *threadarg) {
+void *test03_thread(void *threadarg) {
     struct thread_data *params;
     params = (struct thread_data *) threadarg;
     hashmap<int, int> &m = *(params->m); // reference assignment (no constructor)
@@ -32,9 +32,7 @@ void *test1_thread(void *threadarg) {
 }
 
 
-
-
-void test1() {
+void test03() {
     hashmap<int, int> m{};
 
     pthread_t threads[NUM_THREADS];
@@ -45,7 +43,7 @@ void test1() {
     for (i = 0; i < NUM_THREADS; i++) {
         cout << "test1() : creating thread, " << i << endl;
         td[i] = {i, rand() % 10, &m, rand() % 100};
-        rc = pthread_create(&threads[i], nullptr, test1_thread, (void *) &td[i]);
+        rc = pthread_create(&threads[i], nullptr, test03_thread, (void *) &td[i]);
 
         if (rc) {
             cout << "Error: unable to create thread," << rc << endl;
@@ -55,10 +53,34 @@ void test1() {
     pthread_exit(nullptr);
 }
 
+void test02() {
+    hashmap<int, int> m{};
+    for (int i = 0; i < 3; ++i) {
+        m.insert(i,i, 1); // TODO: insert should not include the thread id
+    }
+    for (int i = 0; i < 3; ++i) {
+        hashmap<int,int>::Tuple t = m.lookup(i);
+        assert(t.status && t.value == i);
+    }
+}
+
+void test01() {
+    hashmap<int, int> m{};
+    for (int i = 0; i < 2; ++i) {
+        m.insert(i,i, 1); // TODO: insert should not include the thread id
+    }
+    for (int i = 0; i < 2; ++i) {
+        hashmap<int,int>::Tuple t = m.lookup(i);
+        assert(t.status && t.value == i);
+    }
+}
+
 
 int main() {
     cout << "Hello Efficient Wait-Free Resizable HashMap!" << endl;
-    test1();
+    test01(); // test without threads
+    test02(); // test without threads
+    test03();
     return 0;
 }
 
