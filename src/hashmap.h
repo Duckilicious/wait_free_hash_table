@@ -6,7 +6,7 @@
 #define EWRHT_HASHMAP_H
 
 #define BUCKET_SIZE (2)
-#define NUMBER_OF_THREADS (64)
+#define NUMBER_OF_THREADS (1)
 #define NOT_FOUND (-1)
 #define FULL_BUCKET (-1)
 #define BIGWORD_SIZE (16)
@@ -17,6 +17,9 @@
 #include <atomic>
 #include <cassert>
 
+enum Status_type {
+    TRUE, FALSE, FAIL
+};
 
 template<typename Key, typename Value>
 class hashmap {
@@ -31,10 +34,6 @@ class hashmap {
         INS, DEL
     };
 
-    enum Status_type {
-        TRUE, FALSE, FAIL
-    };
-
     struct Operation {
         Op_type type;
         Key key;
@@ -44,6 +43,7 @@ class hashmap {
 
         Operation(Op_type t, Key k, Value v, int seq, size_t h) :
                 type(t), key(k), value(v), seqnum(seq), hash(h) {};
+        Operation() : seqnum(0) {};
     };
 
     struct Result {
@@ -82,6 +82,13 @@ class hashmap {
 
         bool testBit(unsigned int id) const {
             return ((Data[id/8] & (1 << (id % 8))) != 0);
+        }
+
+        void flipBit(const unsigned int id) {
+            if(this->testBit(id))
+                clearBit(id);
+            else
+                setBit(id);
         }
     };
 
@@ -178,6 +185,7 @@ class hashmap {
             dir[1]->depth = 1;
             dir[0]->prefix = 0;
             dir[1]->prefix = 1;
+
         }
 
         size_t getDepth() {
@@ -200,15 +208,14 @@ class hashmap {
 
         void EnlargeDir() {
             Bucket **new_dir = new Bucket*[POW(depth + 1)]();
-
             for (int i = 0; i < POW(depth + 1); ++i) {
                 new_dir[(i << 1) + 0] = dir[i];
                 new_dir[(i << 1) + 1] = dir[i];
             }
 
-            delete[] dir;
-            dir = new_dir; // NOTE: This is a bug the pointer to the array will contain garbage when you exit this function
-            depth++;
+             delete[] dir; //third/second time we delete this it fails why? maybe because it's not an array anymore?
+             dir = new_dir;
+             depth++;
         }
 
         ~DState() {
@@ -218,6 +225,8 @@ class hashmap {
             delete[] dir;
         }
     };
+
+
 
     /*** Global variables of the class goes below: ***/
     volatile std::atomic<DState*> ht;
@@ -232,18 +241,18 @@ class hashmap {
         BigWord oldToggle;
         BState *oldBState, *newBState;
 
-        b->toggle.setBit(id); // mark as worked on by thread id
+        b->toggle.flipBit(id); // mark as worked on by thread id
 
         for (int i = 0; i < 2; i++) {
             oldBState = b->state.load(std::memory_order_relaxed); // this is the most efficient access, it is suppose to work since the algo already covers all the cases
             newBState = new BState(*oldBState); // copy constructor, pointer assignment
             oldToggle = b->toggle; // copy constructor using operator=
 
-            for (unsigned int j = 0; (j < NUMBER_OF_THREADS); j++) {
+            for (unsigned int j = 0; (j <= NUMBER_OF_THREADS); j++) {
                 if (oldToggle.testBit(j) == oldBState->applied.testBit(j)) continue;
                 if (newBState->results[j].seqnum < help[j]->seqnum) {
                     newBState->results[j].status = ExecOnBucket(newBState, *help[j]);
-                    if (newBState->results[j].status != FAIL)
+                     if (newBState->results[j].status != FAIL)
                         newBState->results[j].seqnum = help[j]->seqnum;
                 }
             }
@@ -337,11 +346,11 @@ class hashmap {
                 if (bs.results[j].seqnum < help[j]->seqnum) {
                     Bucket *bDest = d.dir[Prefix(help[j]->key, d.depth)];
                     BState *bsDest = bDest->state.load(std::memory_order_relaxed);
-                    while (bsDest->BucketFull()) {
+                    while (bsDest->BucketFull() == FULL_BUCKET) {
                         Bucket** const splitted = SplitBucket(bDest);
                         delete bDest; // delete old bucket
                         DirectoryUpdate(d, splitted);
-                        delete[] splitted; // deletes only the array that holds the new Buckets
+                        delete[] splitted; //First time it works second/third time fails
                         bDest = d.dir[Prefix(help[j]->key, d.depth)];
                         bsDest = bDest->state.load(std::memory_order_relaxed);
                     }
@@ -384,8 +393,11 @@ class hashmap {
 
 
 public:
-    hashmap() :  help(), opSeqnum() {
+    hashmap() :  help(){
         ht.store(new DState(), std::memory_order_relaxed);
+        for (auto &i : opSeqnum) {
+            i = 0;
+        }
     };
     hashmap(hashmap&) = delete;
     hashmap operator=(hashmap) = delete;
@@ -414,23 +426,39 @@ public:
     }
 
 
-    enum Status_type insert(Key const &key, Value const &value, unsigned int id) {
+    enum Status_type insert(Key const &key, Value const &value, unsigned int const id) {
 
+        opSeqnum[id]++;
         size_t hashed_key = std::hash<Key>{}(key); // TODO: fix hash
-        help[id] = new Operation(INS, key, value, ++opSeqnum[id], hashed_key);
+        help[id] = new Operation(INS, key, value, opSeqnum[id], hashed_key);
         DState *htl = (ht.load(std::memory_order_relaxed));
         size_t hash_prefix = Prefix(hashed_key, htl->getDepth());
 
-
         ApplyWFOp(htl->dir[hash_prefix], id);
+
         htl = (ht.load(std::memory_order_relaxed));
         BState *bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
-
         if (bstate->results[id].seqnum != opSeqnum[id])
-            ResizeWF(); // TODO: going into resize when there is still room in the Bucket.. why?
+            ResizeWF(); // Fixed entering this fo no reason
+
         htl = (ht.load(std::memory_order_relaxed));
         bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
         return bstate->results[id].status;
+    }
+
+    void DebugPrintDir() {
+        auto htl = ht.load(std::memory_order_relaxed);
+        for(int i = 0; i < POW(htl->depth); i++) {
+            BState *bs = htl->dir[i]->state.load(std::memory_order_relaxed);
+            std::cout << "Entry: " << i << " points to bucket with prefix " << htl->dir[i]->prefix << "\n";
+            std::cout << '\t' << "Items in Bstate: " << '\n';
+            for(int j = 0; j < BUCKET_SIZE; j++) {
+                if(bs->items[j] != nullptr) {
+                    std::cout << '\t' << '\t' <<  "hash: " << bs->items[j]->hash  << " value: " << bs->items[j]->value
+                    << " key: " << bs->items[j]->key << '\n';
+                }
+            }
+        }
     }
 
 

@@ -62,13 +62,15 @@ void test02() {
         hashmap<int,int>::Tuple t = m.lookup(i);
         assert(t.status && t.value == i);
     }
-}
+   }
 
 void test01() {
     hashmap<int, int> m{};
-    for (int i = 0; i < 2; ++i) {
-        m.insert(i,i, 1); // TODO: insert should not include the thread id
+      for (int i = 0; i < 10; ++i) {
+        if(i == 7) m.DebugPrintDir();
+        enum Status_type st = m.insert(i,i, 0); // TODO: insert should not include the thread id
     }
+    m.DebugPrintDir();
     for (int i = 0; i < 2; ++i) {
         hashmap<int,int>::Tuple t = m.lookup(i);
         assert(t.status && t.value == i);
