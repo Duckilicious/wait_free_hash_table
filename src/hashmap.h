@@ -16,7 +16,7 @@
 #include <pthread.h>
 #include <atomic>
 #include <cassert>
-#include "../xxhash_cpp/include/xxhash.hpp"
+#include "xxhash/include/xxhash.hpp"
 
 
 enum Status_type {
@@ -428,7 +428,7 @@ public:
         }
         return {false, 0};
     }
-    
+
     bool insert(Key const &key, Value const &value, unsigned int const id) {
 
         opSeqnum[id]++;
