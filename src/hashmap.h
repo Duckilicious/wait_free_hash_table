@@ -16,6 +16,8 @@
 #include <pthread.h>
 #include <atomic>
 #include <cassert>
+#include "../xxhash_cpp/include/xxhash.hpp"
+
 
 enum Status_type {
     TRUE, FALSE, FAIL
@@ -25,7 +27,7 @@ template<typename Key, typename Value>
 class hashmap {
     // private:
     struct Triple {
-        size_t hash;
+        xxh::hash_t<32> hash;
         Key key;
         Value value;
     };
@@ -41,7 +43,7 @@ class hashmap {
         int seqnum;
         size_t hash;
 
-        Operation(Op_type t, Key k, Value v, int seq, size_t h) :
+        Operation(Op_type t, Key k, Value v, int seq, xxh::hash_t<32> h) :
                 type(t), key(k), value(v), seqnum(seq), hash(h) {};
         Operation() : seqnum(0) {}; // todo: when this is used? maybe init all fields?
     };
@@ -426,20 +428,12 @@ public:
         }
         return {false, 0};
     }
-
-    int temp_hash_index = 0; // TODO DELETE
-    size_t temp_hash() { // TODO DELETE
-        assert(temp_hash_index < 6);
-        size_t a[] = {0x0000000000000000, 0x4000000000000000, 0x8000000000000000, 0xC000000000000000, 0xE000000000000000}; // 0x7fffffffffffffff
-        // 000, 010, 100, 110, 111
-        return a[temp_hash_index++];
-    }
-
+    
     bool insert(Key const &key, Value const &value, unsigned int const id) {
 
         opSeqnum[id]++;
-//        size_t hashed_key = std::hash<Key>{}(key); // TODO: fix hash
-        size_t hashed_key = temp_hash(); // TODO DELETE
+        const void* kptr = &key;
+        xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
         help[id] = new Operation(INS, key, value, opSeqnum[id], hashed_key);
         DState *htl = (ht.load(std::memory_order_relaxed));
         size_t hash_prefix = Prefix(hashed_key, htl->getDepth());

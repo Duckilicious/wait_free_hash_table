@@ -78,6 +78,7 @@ void test02() {
     assert(st);
     st = m.insert(2000000000,2, 0);
     assert(st);
+    m.DebugPrintDir();
     st = m.insert(-1,3, 0);
     assert(st);
     st = m.insert(-2,4, 0);
@@ -91,7 +92,7 @@ void test02() {
     assert(t.status && t.value == 3);
     t = m.lookup(-2);
     assert(t.status && t.value == 4);
-
+    m.DebugPrintDir();
     cout << "Test #02 Passed!" << endl;
 }
 
@@ -106,16 +107,16 @@ void test01() {
         hashmap<int,int>::Tuple t = m.lookup(i);
         assert(t.status && t.value == i);
     }
+    m.DebugPrintDir();
     cout << "Test #01 Passed!" << endl;
 }
 
 int main() {
-//    cout << std::hash<int>{}(-2147483648) << endl;
     cout << "Hello Efficient Wait-Free Resizable HashMap!" << endl;
-//    test01(); // test without threads and without resize
-//    test02(); // test without threads and without resize
+    test01(); // test without threads and without resize
+    test02(); // test without threads and without resize
     test03(); // // test without threads and with resize
-//    test04();
+    test04();
     return 0;
 }
 
