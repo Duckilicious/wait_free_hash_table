@@ -41,7 +41,7 @@ class hashmap {
         Key key;
         Value value;
         int seqnum;
-        size_t hash;
+        xxh::hash_t<32>  hash;
 
         Operation(Op_type t, Key k, Value v, int seq, xxh::hash_t<32> h) :
                 type(t), key(k), value(v), seqnum(seq), hash(h) {};
