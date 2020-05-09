@@ -387,11 +387,11 @@ class hashmap {
 
     size_t Prefix(size_t const hash, size_t const depth) const {
         assert(depth);
-        int64_t mask = (1 << depth) - 1; //This will always result in all the first depth bits on
-        int64_t prefix = (int64_t)hash & mask;
-        return (size_t)prefix;
+        int shift = sizeof(size_t)*8 - depth;
+        size_t mask = ~(size_t)((1 << (shift)) - 1);
+        size_t prefix = (size_t)((hash & mask) >> shift);
+        return prefix;
     }
-
 
 public:
     hashmap() :  help(){
