@@ -43,7 +43,7 @@ class hashmap {
 
         Operation(Op_type t, Key k, Value v, int seq, size_t h) :
                 type(t), key(k), value(v), seqnum(seq), hash(h) {};
-        Operation() : seqnum(0) {};
+        Operation() : seqnum(0) {}; // todo: when this is used? maybe init all fields?
     };
 
     struct Result {
@@ -188,8 +188,8 @@ class hashmap {
 
         }
 
-        size_t getDepth() {
-            return depth;
+        inline size_t getDepth() {
+            return this->depth;
         }
 
         Bucket getDir() {
@@ -208,7 +208,7 @@ class hashmap {
 
         void EnlargeDir() {
             Bucket **new_dir = new Bucket*[POW(depth + 1)]();
-            for (int i = 0; i < POW(depth + 1); ++i) {
+            for (int i = 0; i < POW(depth); ++i) {
                 new_dir[(i << 1) + 0] = dir[i];
                 new_dir[(i << 1) + 1] = dir[i];
             }
@@ -302,6 +302,7 @@ class hashmap {
                 }
             }
         }
+        return TRUE;
     }
 
     Bucket** SplitBucket(Bucket *b) { // returns 2 new Buckets
@@ -310,7 +311,7 @@ class hashmap {
         Bucket **res = new Bucket*[2];
         BState* const bs0 = new BState(bs.results, b->toggle); // special constructor
         BState* const bs1 = new BState(bs.results, b->toggle);
-        res[0] = new Bucket((b->prefix << 1) + 0, b->depth + 1, bs0, BigWord()); // maybe should init with {}
+        res[0] = new Bucket((b->prefix << 1) + 0, b->depth + 1, bs0, BigWord());
         res[1] = new Bucket((b->prefix << 1) + 1, b->depth + 1, bs1, BigWord());
 
         // split the items between the new buckets:
@@ -339,7 +340,7 @@ class hashmap {
         }
     }
 
-    bool ApplyPendingResize(DState &d, Bucket const& bFull) {
+    void ApplyPendingResize(DState &d, Bucket const& bFull) {
         for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
             if (help[j] && Prefix(help[j]->key, bFull.depth) == bFull.prefix) {
                 BState const& bs = *(bFull.state.load(std::memory_order_relaxed));
@@ -361,7 +362,7 @@ class hashmap {
         }
     }
 
-    bool ResizeWF() {
+    void ResizeWF() {
         for (int k = 0; k < 2; ++k) {
             DState *oldD = ht.load(std::memory_order_relaxed);
             DState *newD = new DState(*oldD);
@@ -384,7 +385,7 @@ class hashmap {
         }
     }
 
-    size_t Prefix(size_t hash, size_t depth) {
+    size_t Prefix(size_t const hash, size_t const depth) const {
         assert(depth);
         int64_t mask = (1 << depth) - 1; //This will always result in all the first depth bits on
         int64_t prefix = (int64_t)hash & mask;
@@ -415,9 +416,10 @@ public:
     };
 
     Tuple lookup(Key const &key) const& { // return type from lookup is "const&" ?
+        size_t hashed_key = std::hash<Key>{}(key); // we will use std hash for now
         DState *htl = (ht.load(std::memory_order_relaxed));
-        std::size_t hashed_key = std::hash<Key>{}(key); // we will use std hash for now
-        BState *bs = htl->dir[hashed_key]->state.load(std::memory_order_relaxed);
+        size_t hash_prefix = Prefix(hashed_key, htl->getDepth());
+        BState *bs = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
         for (Triple *t : bs->items) {
             // TODO: what if the BState gets deleted while this search?
             if (t && t->key == key) return {true, t->value};
@@ -426,7 +428,7 @@ public:
     }
 
 
-    enum Status_type insert(Key const &key, Value const &value, unsigned int const id) {
+    bool insert(Key const &key, Value const &value, unsigned int const id) {
 
         opSeqnum[id]++;
         size_t hashed_key = std::hash<Key>{}(key); // TODO: fix hash
@@ -439,14 +441,15 @@ public:
         htl = (ht.load(std::memory_order_relaxed));
         BState *bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
         if (bstate->results[id].seqnum != opSeqnum[id])
-            ResizeWF(); // Fixed entering this fo no reason
+            ResizeWF();
 
         htl = (ht.load(std::memory_order_relaxed));
         bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
-        return bstate->results[id].status;
+        return (bstate->results[id].status == TRUE);
     }
 
     void DebugPrintDir() {
+        std::cout << "#" << std::endl;
         auto htl = ht.load(std::memory_order_relaxed);
         for(int i = 0; i < POW(htl->depth); i++) {
             BState *bs = htl->dir[i]->state.load(std::memory_order_relaxed);

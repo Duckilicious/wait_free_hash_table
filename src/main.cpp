@@ -29,6 +29,7 @@ void *test03_thread(void *threadarg) {
     }
 
     pthread_exit(nullptr);
+    return nullptr;
 }
 
 
@@ -55,34 +56,40 @@ void test03() {
 
 void test02() {
     hashmap<int, int> m{};
-    for (int i = 0; i < 3; ++i) {
-        m.insert(i,i, 1); // TODO: insert should not include the thread id
+    int test_len = 5;
+    for (int i = 0; i < test_len; ++i) {
+        if (i == 4) m.DebugPrintDir();
+        bool st = m.insert(i,i, 0); // TODO: insert should not include the thread id
+//        assert(st); // todo: i==5 returns fail (but insert was okay)
     }
-    for (int i = 0; i < 3; ++i) {
+    m.DebugPrintDir();
+    for (int i = 0; i < test_len; ++i) {
         hashmap<int,int>::Tuple t = m.lookup(i);
         assert(t.status && t.value == i);
     }
-   }
+    cout << "Test #02 Passed!" << endl;
+}
 
 void test01() {
     hashmap<int, int> m{};
-      for (int i = 0; i < 10; ++i) {
-        if(i == 7) m.DebugPrintDir();
-        enum Status_type st = m.insert(i,i, 0); // TODO: insert should not include the thread id
+    int test_len = 4;
+        for (int i = 0; i < test_len; ++i) {
+        bool st = m.insert(i,i, 0); // TODO: insert should not include the thread id
+        assert(st);
     }
-    m.DebugPrintDir();
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < test_len; ++i) {
         hashmap<int,int>::Tuple t = m.lookup(i);
         assert(t.status && t.value == i);
     }
+    cout << "Test #01 Passed!" << endl;
 }
 
 
 int main() {
     cout << "Hello Efficient Wait-Free Resizable HashMap!" << endl;
-    test01(); // test without threads
+    test01(); // test without threads and without resize
     test02(); // test without threads
-    test03();
+//    test03();
     return 0;
 }
 
