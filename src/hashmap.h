@@ -11,6 +11,7 @@
 #define FULL_BUCKET (-1)
 #define BIGWORD_SIZE (16)
 #define POW(exp) ((unsigned)1 << (unsigned)(exp))
+#define SIZE_OF_HASH (32)
 
 #include <iostream>
 #include <pthread.h>
@@ -394,15 +395,26 @@ class hashmap {
         }
     }
 
-    uint32_t Prefix(xxh::hash_t<32> const hash, size_t const depth) const {
+    uint32_t Prefix(xxh::hash_t<32> const hash, uint32_t const depth) const {
         assert(depth);
-        int shift = sizeof(xxh::hash_t<32>)*8 - depth;
+        int shift = SIZE_OF_HASH - depth;
         uint32_t mask = ~(uint32_t)((1 << (shift)) - 1);
         auto prefix = (uint32_t)((hash & mask) >> shift);
         return prefix;
     }
 
+    uint32_t Prefix(xxh::hash_t<32> const hash, uint32_t const depth, uint32_t  start) const {
+        start = SIZE_OF_HASH - start;
+        assert(SIZE_OF_HASH - start - depth > 0); //BUG
+
+        int shift = SIZE_OF_HASH - start - depth;
+        uint32_t mask = ~(uint32_t)((1 << (shift)) - 1);
+        auto prefix = (uint32_t)(hash & mask) << (start - depth) >> (shift + start);
+        return prefix;
+    }
+
 public:
+
     hashmap() :  help(){
         ht.store(new DState(), std::memory_order_relaxed);
         for (auto &i : opSeqnum) {
