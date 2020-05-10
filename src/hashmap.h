@@ -145,7 +145,7 @@ class hashmap {
     };
 
     struct Bucket {
-        int prefix; // TODO: should it be of type size_t?
+        uint32_t prefix; // TODO: should it be of type size_t?
         size_t depth;
         volatile std::atomic<BState*> state; //TODO: volatile means un-cacheable this is the CAS API demands, but maybe we can find a better CAS that doesn't require this since this is more exspensive
         BigWord toggle; // 128 bit array
@@ -159,10 +159,10 @@ class hashmap {
             this->state.store(new BState(*(b.state.load(std::memory_order_relaxed))), std::memory_order_relaxed);
         } // this is the copy constructor
 
-        explicit Bucket(int p, size_t d, volatile std::atomic<BState*> s, BigWord t) :
+        explicit Bucket(uint32_t p, size_t d, volatile std::atomic<BState*> s, BigWord t) :
                 prefix(p), depth(d), state(s), toggle(t){}
 
-        explicit Bucket(int p, size_t d, BState* s, BigWord t) : prefix(p), depth(d), toggle(t){
+        explicit Bucket(uint32_t p, size_t d, BState* s, BigWord t) : prefix(p), depth(d), toggle(t){
             this->state.store(s, std::memory_order_relaxed);
         }
 
@@ -387,11 +387,11 @@ class hashmap {
         }
     }
 
-    size_t Prefix(size_t const hash, size_t const depth) const {
+    uint32_t Prefix(xxh::hash_t<32> const hash, size_t const depth) const {
         assert(depth);
-        int shift = sizeof(size_t)*8 - depth;
-        size_t mask = ~(size_t)((1 << (shift)) - 1);
-        size_t prefix = (size_t)((hash & mask) >> shift);
+        int shift = sizeof(xxh::hash_t<32>)*8 - depth;
+        uint32_t mask = ~(uint32_t)((1 << (shift)) - 1);
+        auto prefix = (uint32_t)((hash & mask) >> shift);
         return prefix;
     }
 
@@ -417,8 +417,9 @@ public:
         Value value;
     };
 
-    Tuple lookup(Key const &key) const& { // return type from lookup is "const&" ?
-        size_t hashed_key = std::hash<Key>{}(key); // we will use std hash for now
+    Tuple lookup(Key const &key) const& {// return type from lookup is "const&" ?
+        const void* kptr = &key;
+        xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
         DState *htl = (ht.load(std::memory_order_relaxed));
         size_t hash_prefix = Prefix(hashed_key, htl->getDepth());
         BState *bs = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
