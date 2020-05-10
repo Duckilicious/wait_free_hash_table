@@ -16,16 +16,18 @@
 #include <pthread.h>
 #include <atomic>
 #include <cassert>
+#include <bitset> // TODO using for the print only
 #include "xxhash/include/xxhash.hpp"
 
 
-enum Status_type {
-    TRUE, FALSE, FAIL
-};
 
 template<typename Key, typename Value>
 class hashmap {
     // private:
+    enum Status_type {
+        TRUE, FALSE, FAIL
+    };
+
     struct Triple {
         xxh::hash_t<32> hash;
         Key key;
@@ -335,11 +337,14 @@ class hashmap {
         for (int i = 0; i < 2; ++i) {
             Bucket* b = blist[i];
             if (b->depth > d.depth) d.EnlargeDir();
-            // TODO: "entries" part is really heavy and should be shorten: (I need help with that)
             for (size_t e = 0; e < POW(d.depth); ++e) {
-                if (e == b->prefix)
+                // TODO: "entries" part is really heavy and should be shorten: (I need help with that)
+                // maybe use binary search somehow instead of moving one by one?
+                if (Prefix(e, b->depth, d.depth) == b->prefix) { // TODO
                     // TODO: need to delete old bucket?
                     d.dir[e] = b;
+//                    if (e + 1 < POW(d.depth) && new_Prefix(e+1, b->depth, d.depth) != b->prefix) break; // this is early stop (not tested yet)
+                }
             }
         }
     }
@@ -383,7 +388,7 @@ class hashmap {
             }
             // try replace to the new DState
             if (std::atomic_compare_exchange_weak<DState*>(&ht, &oldD,  newD))
-                delete oldD;
+                delete oldD; // TODO: on success maybe return? (skip the second loop)
             else
                 delete newD;
         }
@@ -454,21 +459,23 @@ public:
     }
 
     void DebugPrintDir() {
-        std::cout << "#" << std::endl;
+        std::cout << std::endl;
         auto htl = ht.load(std::memory_order_relaxed);
         for(int i = 0; i < POW(htl->depth); i++) {
             BState *bs = htl->dir[i]->state.load(std::memory_order_relaxed);
-            std::cout << "Entry: " << i << " points to bucket with prefix " << htl->dir[i]->prefix << "\n";
-            std::cout << '\t' << "Items in Bstate: " << '\n';
+            std::cout << "Entries: [" << i << ",";
+            while (i+1 < POW(htl->depth) && htl->dir[i]->prefix == htl->dir[i+1]->prefix) i++;
+            std::cout << i << "]\tpoints to bucket with prefix: ";
+            for (int k = htl->dir[i]->depth - 1; k >= 0; --k) std::cout << ((htl->dir[i]->prefix >> k) & 1);
+             std::cout << ".\tItems: " << std::endl;
             for (int j = 0; j < BUCKET_SIZE; j++) {
                 if (bs->items[j] != nullptr) {
-                    std::cout << '\t' << '\t' <<  "hash: " << bs->items[j]->hash  << " value: " << bs->items[j]->value
-                    << " key: " << bs->items[j]->key << '\n';
+                    std::cout << "\t\t" <<  "(hash: " << std::bitset<32>(bs->items[j]->hash)  << ")\t\tvalue: " << bs->items[j]->value
+                    << "\tkey: " << bs->items[j]->key << std::endl;
                 }
             }
         }
     }
-
 
     bool remove(Key const &key, unsigned int const id) {
         opSeqnum[id]++;

@@ -56,43 +56,34 @@ void test04() {
 
 void test03() {
     hashmap<int, int> m{};
-    bool st = m.insert(1,1, 0);
-    assert(st);
-    st = m.insert(2,2, 0);
-    assert(st);
-    st = m.insert(3,3, 0);
-    assert(st);
-    st = m.insert(4,4, 0);
-    assert(st);
-    st = m.insert(5,5, 0);
-    //assert(st);
-
+    int test_len = 5;
+    for (int i = 0; i < test_len; ++i) {
+        bool st = m.insert(i,i, 0);
+        assert(st);
+    }
     m.DebugPrintDir();
-
+    for (int i = 0; i < test_len; ++i) {
+        hashmap<int,int>::Tuple t = m.lookup(i);
+        assert(t.status && t.value == i);
+        m.remove(i,0);
+        t = m.lookup(i);
+        assert(!t.status);
+    }
     cout << "Test #03 Passed!" << endl;
 }
 
 void test02() {
     hashmap<int, int> m{};
-    bool st = m.insert(1000000000,1, 0);
-    assert(st);
-    st = m.insert(2000000000,2, 0);
-    assert(st);
+    int test_len = 8;
+    for (int i = 0; i < test_len; ++i) {
+        bool st = m.insert(i,i, 0);
+        assert(st);
+    }
     m.DebugPrintDir();
-    st = m.insert(-1,3, 0);
-    assert(st);
-    st = m.insert(-2,4, 0);
-    assert(st);
-
-    hashmap<int,int>::Tuple t = m.lookup(1000000000);
-    assert(t.status && t.value == 1);
-    t = m.lookup(2000000000);
-    assert(t.status && t.value == 2);
-    t = m.lookup(-1);
-    assert(t.status && t.value == 3);
-    t = m.lookup(-2);
-    assert(t.status && t.value == 4);
-    m.DebugPrintDir();
+    for (int i = 0; i < test_len; ++i) {
+        hashmap<int,int>::Tuple t = m.lookup(i);
+        assert(t.status && t.value == i);
+    }
     cout << "Test #02 Passed!" << endl;
 }
 
@@ -103,13 +94,14 @@ void test01() {
         bool st = m.insert(i,i, 0); // TODO: insert should not include the thread id
         assert(st);
     }
-    m.DebugPrintDir();
+//    m.DebugPrintDir();
     for (int i = 0; i < test_len; ++i) {
         hashmap<int,int>::Tuple t = m.lookup(i);
         assert(t.status && t.value == i);
         m.remove(i,0);
+        t = m.lookup(i);
+        assert(!t.status);
     }
-    m.DebugPrintDir();
     cout << "Test #01 Passed!" << endl;
 }
 
@@ -117,8 +109,8 @@ int main() {
     cout << "Hello Efficient Wait-Free Resizable HashMap!" << endl;
     test01(); // test without threads and without resize
     test02(); // test without threads and without resize
-    test03(); // // test without threads and with resize
-    test04();
+//    test03(); // test without threads and with resize
+//    test04();
     return 0;
 }
 
