@@ -103,9 +103,11 @@ void test01() {
         bool st = m.insert(i,i, 0); // TODO: insert should not include the thread id
         assert(st);
     }
+    m.DebugPrintDir();
     for (int i = 0; i < test_len; ++i) {
         hashmap<int,int>::Tuple t = m.lookup(i);
         assert(t.status && t.value == i);
+        m.remove(i,0);
     }
     m.DebugPrintDir();
     cout << "Test #01 Passed!" << endl;

@@ -30,6 +30,9 @@ class hashmap {
         xxh::hash_t<32> hash;
         Key key;
         Value value;
+
+        Triple(xxh::hash_t<32> h, Key k, Value v ) :
+            hash(h), key(k), value(v) {};
     };
 
     enum Op_type {
@@ -45,7 +48,9 @@ class hashmap {
 
         Operation(Op_type t, Key k, Value v, int seq, xxh::hash_t<32> h) :
                 type(t), key(k), value(v), seqnum(seq), hash(h) {};
-        Operation() : seqnum(0) {}; // todo: when this is used? maybe init all fields?
+
+        Operation(Op_type t, Key k, int seq, xxh::hash_t<32> h) :
+                type(t), key(k), seqnum(seq), hash(h) {};
     };
 
     struct Result {
@@ -269,23 +274,24 @@ class hashmap {
         }
     }
 
-    Status_type ExecOnBucket(BState *b, Operation const &op) { //TODO this function will now not work correctly
+    Status_type ExecOnBucket(BState *b, Operation const &op) {
         int updateID = 0;
         int freeID = 0;
         Triple *temp;
-        auto *c = new Triple; //can create a more elegant c'tor
-
-        c->value = op.value;
-        c->key = op.key;
-        c->hash = op.hash;
 
         freeID = (b->BucketFull());
         if (freeID == FULL_BUCKET) {
-            delete c;
             return FAIL;
         }
-
         else {
+            //Delete
+            if(op.type == DEL) {
+                delete b->items[updateID];
+                b->items[updateID] = nullptr;
+                return TRUE;
+            }
+            //Insert/update
+            auto *c = new Triple(op.hash, op.key, op.value);
             updateID = b->existInBucket(*c);
             if (updateID == NOT_FOUND) {
                 if (op.type == INS) {
@@ -297,10 +303,6 @@ class hashmap {
                     temp = b->items[updateID];
                     b->items[updateID] = c;
                     delete temp;
-                }
-                if(op.type == DEL) {
-                    delete b->items[updateID];
-                    b->items[updateID] = nullptr;
                 }
             }
         }
@@ -437,7 +439,7 @@ public:
         xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
         help[id] = new Operation(INS, key, value, opSeqnum[id], hashed_key);
         DState *htl = (ht.load(std::memory_order_relaxed));
-        size_t hash_prefix = Prefix(hashed_key, htl->getDepth());
+        uint32_t hash_prefix = Prefix(hashed_key, htl->getDepth());
 
         ApplyWFOp(htl->dir[hash_prefix], id);
 
@@ -468,8 +470,26 @@ public:
     }
 
 
+    bool remove(Key const &key, unsigned int const id) {
+        opSeqnum[id]++;
+        const void* kptr = &key;
+        xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
+        help[id] = new Operation(DEL, key, opSeqnum[id], hashed_key);
+        DState *htl = (ht.load(std::memory_order_relaxed));
+        uint32_t hash_prefix = Prefix(hashed_key, htl->getDepth());
 
-    bool remove(Key const &key);
+        ApplyWFOp(htl->dir[hash_prefix], id);
+
+        htl = (ht.load(std::memory_order_relaxed));
+        BState *bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
+        if (bstate->results[id].seqnum != opSeqnum[id])
+            ResizeWF();
+
+        htl = (ht.load(std::memory_order_relaxed));
+        bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
+        return (bstate->results[id].status == TRUE);
+
+    }
 
 };
 
