@@ -56,12 +56,12 @@ void test04() {
 
 void test03() {
     hashmap<int, int> m{};
-    int test_len = 5;
+    int test_len = 3;
     for (int i = 0; i < test_len; ++i) {
         bool st = m.insert(i,i, 0);
         assert(st);
     }
-    m.DebugPrintDir();
+//    m.DebugPrintDir();
     for (int i = 0; i < test_len; ++i) {
         hashmap<int,int>::Tuple t = m.lookup(i);
         assert(t.status && t.value == i);
@@ -69,21 +69,23 @@ void test03() {
         t = m.lookup(i);
         assert(!t.status);
     }
+//    m.DebugPrintDir(); // todo: remove op enlarges the dir.. should it happen?
     cout << "Test #03 Passed!" << endl;
 }
 
 void test02() {
     hashmap<int, int> m{};
-    int test_len = 8;
+    int test_len = 27; // todo: 27 is okay, 28 and higher makes problems
     for (int i = 0; i < test_len; ++i) {
         bool st = m.insert(i,i, 0);
         assert(st);
     }
-    m.DebugPrintDir();
+//    m.DebugPrintDir();
     for (int i = 0; i < test_len; ++i) {
         hashmap<int,int>::Tuple t = m.lookup(i);
         assert(t.status && t.value == i);
     }
+//    m.DebugPrintDir();
     cout << "Test #02 Passed!" << endl;
 }
 
@@ -102,15 +104,21 @@ void test01() {
         t = m.lookup(i);
         assert(!t.status);
     }
+    for (int i = 0; i < test_len; ++i) {
+        hashmap<int,int>::Tuple t = m.lookup(i);
+        assert(!t.status);
+        m.remove(i,0);
+        assert(!t.status);
+    }
     cout << "Test #01 Passed!" << endl;
 }
 
 int main() {
     cout << "Hello Efficient Wait-Free Resizable HashMap!" << endl;
     test01(); // test without threads and without resize
-    test02(); // test without threads and without resize
-//    test03(); // test without threads and with resize
-//    test04();
+    test02(); // test without threads and with resize
+    test03(); // test without threads and with resize and remove
+//    test04(); // test with threads
     return 0;
 }
 

@@ -109,7 +109,8 @@ class hashmap {
 
     public:
         BState() : items(), results(), applied() {}
-        BState(BState const& old) : applied(old.applied){
+        BState(BState const& old) : applied(old.applied) {
+            // TODO notice that copy constructor maybe should copy only the items?
             for (int i = 0; i < BUCKET_SIZE; i++)
                 this->items[i] = old.items[i];
 
@@ -202,15 +203,15 @@ class hashmap {
             return this->depth;
         }
 
-        Bucket getDir() {
-            return dir;
-        }
-
         DState(const DState &d) : depth(d.depth) {
             dir = new Bucket*[POW(depth)];
             for (int i = 0; i < POW(depth); i++) {
                 assert(d.dir[i]);
                 dir[i] = new Bucket(*(d.dir[i]));
+                while (i+1 < POW(depth) && d.dir[i] == d.dir[i+1]) {
+                    dir[i+1] = dir[i];
+                    i++;
+                }
             }
         }
 
@@ -247,7 +248,6 @@ class hashmap {
 
 
     void ApplyWFOp(Bucket *b, unsigned int id) {
-        std::atomic<BState*> newBState_atomic;
         BigWord oldToggle;
         BState *oldBState, *newBState;
 
@@ -256,10 +256,11 @@ class hashmap {
         for (int i = 0; i < 2; i++) {
             oldBState = b->state.load(std::memory_order_relaxed); // this is the most efficient access, it is suppose to work since the algo already covers all the cases
             newBState = new BState(*oldBState); // copy constructor, pointer assignment
+            newBState->applied = BigWord(); // ADDED 11/05/2020
             oldToggle = b->toggle; // copy constructor using operator=
 
             for (unsigned int j = 0; (j <= NUMBER_OF_THREADS); j++) {
-                if (oldToggle.testBit(j) == oldBState->applied.testBit(j)) continue;
+                if (oldToggle.testBit(j) == newBState->applied.testBit(j)) continue;
                 if (newBState->results[j].seqnum < help[j]->seqnum) {
                     newBState->results[j].status = ExecOnBucket(newBState, *help[j]);
                      if (newBState->results[j].status != FAIL)
@@ -268,7 +269,6 @@ class hashmap {
             }
 
             newBState->applied = oldToggle; // copy constructor using operator=
-            newBState_atomic.store(newBState, std::memory_order_relaxed);
 
             if (std::atomic_compare_exchange_weak<BState*>(&b->state, &oldBState,  newBState))
                 delete oldBState;
@@ -335,16 +335,16 @@ class hashmap {
     }
 
     void DirectoryUpdate(DState &d, Bucket* const *blist) {
-        for (int i = 0; i < 2; ++i) {
-            Bucket* b = blist[i];
-            if (b->depth > d.depth) d.EnlargeDir();
-            for (size_t e = 0; e < POW(d.depth); ++e) {
-                // TODO: "entries" part is really heavy and should be shorten: (I need help with that)
-                // maybe use binary search somehow instead of moving one by one?
-                if (Prefix(e, b->depth, d.depth) == b->prefix) { // TODO
-                    // TODO: need to delete old bucket?
-                    d.dir[e] = b;
-//                    if (e + 1 < POW(d.depth) && new_Prefix(e+1, b->depth, d.depth) != b->prefix) break; // this is early stop (not tested yet)
+        int b_index = 0;
+        if (blist[b_index]->depth > d.depth) d.EnlargeDir();
+        for (size_t e = 0; e < POW(d.depth); ++e) {
+            // maybe use binary search somehow instead of moving one by one at begin?
+            if (Prefix(e, blist[b_index]->depth, d.depth) == blist[b_index]->prefix) {
+                // TODO: when need to delete old bucket? complicated
+                d.dir[e] = blist[b_index];
+                if (e + 1 < POW(d.depth) && Prefix(e+1, blist[b_index]->depth, d.depth) != blist[b_index]->prefix) {
+                    if (b_index == 0) b_index++; // blist[1] will always be right after blist[0]
+                    else break; // early stop
                 }
             }
         }
@@ -359,8 +359,8 @@ class hashmap {
                     BState *bsDest = bDest->state.load(std::memory_order_relaxed);
                     while (bsDest->BucketFull() == FULL_BUCKET) {
                         Bucket** const splitted = SplitBucket(bDest);
-                        delete bDest; // delete old bucket
                         DirectoryUpdate(d, splitted);
+                        delete bDest; // delete old bucket
                         delete[] splitted; //First time it works second/third time fails
                         bDest = d.dir[Prefix(help[j]->hash, d.depth)];
                         bsDest = bDest->state.load(std::memory_order_relaxed);
@@ -403,13 +403,11 @@ class hashmap {
         return prefix;
     }
 
-    uint32_t Prefix(xxh::hash_t<32> const hash, uint32_t const depth, uint32_t  start) const {
-        start = SIZE_OF_HASH - start;
+    uint32_t Prefix(size_t hash, uint32_t const depth, uint32_t start) const {
         assert(SIZE_OF_HASH - start - depth > 0); //BUG
 
-        int shift = SIZE_OF_HASH - start - depth;
-        uint32_t mask = ~(uint32_t)((1 << (shift)) - 1);
-        auto prefix = (uint32_t)(hash & mask) << (start - depth) >> (shift + start);
+        uint32_t mask = (uint32_t)((1 << (start)) - 1); // mask for the first (start) bits
+        auto prefix = (uint32_t)(hash & mask) << (SIZE_OF_HASH - start) >> (SIZE_OF_HASH - depth); // clear bits bigger than start and smaller than depth
         return prefix;
     }
 
@@ -476,13 +474,13 @@ public:
         for(int i = 0; i < POW(htl->depth); i++) {
             BState *bs = htl->dir[i]->state.load(std::memory_order_relaxed);
             std::cout << "Entries: [" << i << ",";
-            while (i+1 < POW(htl->depth) && htl->dir[i]->prefix == htl->dir[i+1]->prefix) i++;
+            while (i+1 < POW(htl->depth) && htl->dir[i]->depth == htl->dir[i+1]->depth && htl->dir[i]->prefix == htl->dir[i+1]->prefix) i++;
             std::cout << i << "]\tpoints to bucket with prefix: ";
             for (int k = htl->dir[i]->depth - 1; k >= 0; --k) std::cout << ((htl->dir[i]->prefix >> k) & 1);
              std::cout << ".\tItems: " << std::endl;
             for (int j = 0; j < BUCKET_SIZE; j++) {
                 if (bs->items[j] != nullptr) {
-                    std::cout << "\t\t" <<  "(hash: " << std::bitset<32>(bs->items[j]->hash)  << ")\t\tvalue: " << bs->items[j]->value
+                    std::cout << "\t\t" <<  "(hash: " << std::bitset<SIZE_OF_HASH>(bs->items[j]->hash)  << ")\t\tvalue: " << bs->items[j]->value
                     << "\tkey: " << bs->items[j]->key << std::endl;
                 }
             }
