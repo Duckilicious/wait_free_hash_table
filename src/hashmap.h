@@ -6,15 +6,14 @@
 #define EWRHT_HASHMAP_H
 
 #define BUCKET_SIZE (2)
-#define NUMBER_OF_THREADS (1)
+#define NUMBER_OF_THREADS (64)
 #define NOT_FOUND (-1)
 #define FULL_BUCKET (-1)
 #define BIGWORD_SIZE (16)
 #define POW(exp) ((unsigned)1 << (unsigned)(exp))
 #define SIZE_OF_HASH (32)
 
-#include <iostream>
-#include <pthread.h>
+#include <iostream> // for debugging
 #include <atomic>
 #include <cassert>
 #include <bitset> // TODO using for the print only
@@ -114,12 +113,12 @@ class hashmap {
             for (int i = 0; i < BUCKET_SIZE; i++)
                 this->items[i] = old.items[i];
 
-            for(int i = 0; i < NUMBER_OF_THREADS; i++)
+            for (int i = 0; i < NUMBER_OF_THREADS; i++)
                 this->results[i] = old.results[i];
         };
         BState(const Result* const r, BigWord const& bw) : items(), applied(bw) {
             // this is a special constructor.
-            for(int i = 0; i < NUMBER_OF_THREADS; i++)
+            for (int i = 0; i < NUMBER_OF_THREADS; i++)
                 this->results[i] = r[i];
         }
         BState operator=(BState b) = delete; // we can implement assignment constructor if we will need to, but it cannot be the default so for now so it's blocked
@@ -150,7 +149,7 @@ class hashmap {
             return NOT_FOUND;
         }
 
-        ~BState() = default; // TODO: maybe need to delete the items here? but they may use in other new BState
+        ~BState() = delete; // TODO: maybe need to delete the items here? but they may use in other new BState
     };
 
     struct Bucket {
@@ -178,7 +177,7 @@ class hashmap {
         Bucket operator=(Bucket b) = delete; // we can implement assignment constructor if we will need to, but it cannot be the default so for now so it's blocked
 
         ~Bucket() {
-            delete this->state.load(std::memory_order_relaxed);
+//            delete this->state.load(std::memory_order_relaxed); // TODO: smart pointers?
         }
     };
 
@@ -224,7 +223,7 @@ class hashmap {
                 new_dir[(i << 1) + 1] = dir[i];
             }
 
-             delete[] dir; //third/second time we delete this it fails why? maybe because it's not an array anymore?
+//             delete[] dir; // TODO: smart pointers?
              dir = new_dir;
              depth++;
         }
@@ -233,7 +232,7 @@ class hashmap {
             for (int i = 0; i < POW(depth); i++) {
                 // if (dir[i]) delete *(dir[i]); TODO: delete the Buckets here? they may use bor the new DState
             }
-            delete[] dir;
+//            delete[] dir; // TODO: smart pointers?
         }
     };
 
@@ -261,6 +260,7 @@ class hashmap {
 
             for (unsigned int j = 0; (j <= NUMBER_OF_THREADS); j++) {
                 if (oldToggle.testBit(j) == newBState->applied.testBit(j)) continue;
+                assert(newBState->results[j].seqnum >= 0 && help[j]->seqnum > 0);
                 if (newBState->results[j].seqnum < help[j]->seqnum) {
                     newBState->results[j].status = ExecOnBucket(newBState, *help[j]);
                      if (newBState->results[j].status != FAIL)
@@ -270,10 +270,9 @@ class hashmap {
 
             newBState->applied = oldToggle; // copy constructor using operator=
 
-            if (std::atomic_compare_exchange_weak<BState*>(&b->state, &oldBState,  newBState))
-                delete oldBState;
-            else
-                delete newBState;
+            if (std::atomic_compare_exchange_weak<BState*>(&b->state, &oldBState,  newBState)) {}
+//                delete oldBState; // TODO: smart pointers?
+//            } else delete newBState;
         }
     }
 
@@ -288,7 +287,7 @@ class hashmap {
         }
         else {
             //Delete
-            if(op.type == DEL) {
+            if (op.type == DEL) {
                 delete b->items[updateID];
                 b->items[updateID] = nullptr;
                 return TRUE;
@@ -302,10 +301,10 @@ class hashmap {
                 }
             }
             else {
-                if(op.type == INS) {
+                if (op.type == INS) {
                     temp = b->items[updateID];
                     b->items[updateID] = c;
-                    delete temp;
+//                    delete temp; // TODO: smart pointers?
                 }
             }
         }
@@ -313,22 +312,22 @@ class hashmap {
     }
 
     Bucket** SplitBucket(Bucket *b) { // returns 2 new Buckets
-        const BState bs = *(b->state.load(std::memory_order_relaxed));
+        const BState *bs = new BState(*(b->state.load(std::memory_order_relaxed))); // copied, todo: delete or smart pointers
         // init 2 new Buckets:
         Bucket **res = new Bucket*[2];
-        BState* const bs0 = new BState(bs.results, b->toggle); // special constructor
-        BState* const bs1 = new BState(bs.results, b->toggle);
+        BState* const bs0 = new BState(bs->results, b->toggle); // special constructor
+        BState* const bs1 = new BState(bs->results, b->toggle);
         res[0] = new Bucket((b->prefix << 1) + 0, b->depth + 1, bs0, BigWord());
         res[1] = new Bucket((b->prefix << 1) + 1, b->depth + 1, bs1, BigWord());
 
         // split the items between the new buckets:
         for (int i = 0; i < BUCKET_SIZE; ++i) {
-            assert(bs.items[i]); // bucket should be full for splitting
+            assert(bs->items[i]); // bucket should be full for splitting
             bool inserted_ok = false; // here for the debugging
-            if (Prefix(bs.items[i]->hash, res[0]->depth) == res[0]->prefix)
-                inserted_ok = bs0->insertItem(bs.items[i]);
+            if (Prefix(bs->items[i]->hash, res[0]->depth) == res[0]->prefix)
+                inserted_ok = bs0->insertItem(bs->items[i]);
             else
-                inserted_ok = bs1->insertItem(bs.items[i]);
+                inserted_ok = bs1->insertItem(bs->items[i]);
             assert(inserted_ok);
         }
         return res;
@@ -354,14 +353,15 @@ class hashmap {
         for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
             if (help[j] && Prefix(help[j]->hash, bFull.depth) == bFull.prefix) {
                 BState const& bs = *(bFull.state.load(std::memory_order_relaxed));
+                assert(bs.results[j].seqnum >= 0 && help[j]->seqnum >= 0);
                 if (bs.results[j].seqnum < help[j]->seqnum) {
                     Bucket *bDest = d.dir[Prefix(help[j]->hash, d.depth)];
                     BState *bsDest = bDest->state.load(std::memory_order_relaxed);
                     while (bsDest->BucketFull() == FULL_BUCKET) {
                         Bucket** const splitted = SplitBucket(bDest);
                         DirectoryUpdate(d, splitted);
-                        delete bDest; // delete old bucket
-                        delete[] splitted; //First time it works second/third time fails
+//                        delete bDest; // TODO: smart pointers?
+                        delete[] splitted;
                         bDest = d.dir[Prefix(help[j]->hash, d.depth)];
                         bsDest = bDest->state.load(std::memory_order_relaxed);
                     }
@@ -379,7 +379,7 @@ class hashmap {
             assert(newD->dir[0]);
 
             for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
-                if (help[j]) {
+                if (help[j]) { // different from the paper cause we might have (help[j] == nullptr)
                     Bucket *b = newD->dir[Prefix(help[j]->hash, newD->depth)];
                     BState *bs = (b->state.load(std::memory_order_relaxed));
                     if (bs->BucketFull() && bs->results[j].seqnum < help[j]->seqnum) {
@@ -387,11 +387,10 @@ class hashmap {
                     }
                 }
             }
-            // try replace to the new DState
-            if (std::atomic_compare_exchange_weak<DState*>(&ht, &oldD,  newD))
-                delete oldD; // TODO: on success maybe return? (skip the second loop)
-            else
-                delete newD;
+
+            if (std::atomic_compare_exchange_weak<DState*>(&ht, &oldD,  newD)) {
+//                delete oldD; // TODO: smart pointers?
+            } else delete newD;
         }
     }
 
@@ -415,9 +414,7 @@ public:
 
     hashmap() :  help(){
         ht.store(new DState(), std::memory_order_relaxed);
-        for (auto &i : opSeqnum) {
-            i = 0;
-        }
+        for (int &i : opSeqnum) i = 0;
     };
     hashmap(hashmap&) = delete;
     hashmap operator=(hashmap) = delete;
@@ -434,7 +431,7 @@ public:
         Value value;
     };
 
-    Tuple lookup(Key const &key) const& {// return type from lookup is "const&" ?
+    Tuple lookup(Key const &key) const& {
         const void* kptr = &key;
         xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
         DState *htl = (ht.load(std::memory_order_relaxed));
@@ -444,6 +441,7 @@ public:
             // TODO: what if the BState gets deleted while this search?
             if (t && t->key == key) return {true, t->value};
         }
+//        this->DebugPrintDir(); // for debugging test05
         return {false, 0};
     }
 
@@ -459,22 +457,27 @@ public:
         ApplyWFOp(htl->dir[hash_prefix], id);
 
         htl = (ht.load(std::memory_order_relaxed));
-        BState *bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
-        if (bstate->results[id].seqnum != opSeqnum[id])
+        const BState &bstate = *(htl->dir[hash_prefix]->state.load(std::memory_order_relaxed));
+        assert(bstate.results[id].seqnum >= 0 && opSeqnum[id] >= 0);
+        if (bstate.results[id].seqnum != opSeqnum[id])
             ResizeWF();
 
         htl = (ht.load(std::memory_order_relaxed));
-        bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
-        return (bstate->results[id].status == TRUE);
+        const BState &bstate2 = *(htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(std::memory_order_relaxed));
+        if (bstate2.results[id].status != TRUE)
+            std::cout << "\n## ERROR INSERTING " << key << "! ##\n"; // for debugging test05
+        return (bstate2.results[id].status == TRUE);
     }
 
-    void DebugPrintDir() {
+    void DebugPrintDir() const {
         std::cout << std::endl;
         auto htl = ht.load(std::memory_order_relaxed);
         for(int i = 0; i < POW(htl->depth); i++) {
             BState *bs = htl->dir[i]->state.load(std::memory_order_relaxed);
             std::cout << "Entries: [" << i << ",";
-            while (i+1 < POW(htl->depth) && htl->dir[i]->depth == htl->dir[i+1]->depth && htl->dir[i]->prefix == htl->dir[i+1]->prefix) i++;
+            while (i+1 < POW(htl->depth) && htl->dir[i] == htl->dir[i+1]) i++;
+            if (i+1 < POW(htl->depth))
+                assert(htl->dir[i]->depth != htl->dir[i+1]->depth || htl->dir[i]->prefix != htl->dir[i+1]->prefix);
             std::cout << i << "]\tpoints to bucket with prefix: ";
             for (int k = htl->dir[i]->depth - 1; k >= 0; --k) std::cout << ((htl->dir[i]->prefix >> k) & 1);
              std::cout << ".\tItems: " << std::endl;
@@ -505,7 +508,6 @@ public:
         htl = (ht.load(std::memory_order_relaxed));
         bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
         return (bstate->results[id].status == TRUE);
-
     }
 
 };
@@ -513,3 +515,15 @@ public:
 
 
 #endif //EWRHT_HASHMAP_H
+
+
+
+
+
+
+
+
+
+
+
+

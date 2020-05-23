@@ -1,57 +1,146 @@
 #include <iostream>
 #include "hashmap.h"
 #include <pthread.h>
+#include <unistd.h> // for sleep
+
+#define KEY(id, k) (id * 100 + k)
 
 using namespace std;
-#define NUM_THREADS 1
 
 struct thread_data {
     int thread_id;
-    int sleep_time;
     hashmap<int, int> *m;
-    int number_of_items_to_enter;
+    int number_to_insert;
+    int number_to_remove;
 };
+
 
 void *test04_thread(void *threadarg) {
     struct thread_data *params;
     params = (struct thread_data *) threadarg;
     hashmap<int, int> &m = *(params->m); // reference assignment (no constructor)
+    int id = params->thread_id;
 
-    cout << "Thread ID : " << params->thread_id;
-    // sleep(params->sleep_time);
-
-    for (int i = 0; i < params->number_of_items_to_enter; ++i) {
-        m.insert(i,i, params->thread_id); // TODO: insert should not include the thread id
+    for (int i = 0; i < params->number_to_insert; ++i) {
+        bool st = m.insert(KEY(id, i),KEY(id, i), id);
+        assert(st);
     }
-    for (int i = 0; i < params->number_of_items_to_enter; ++i) {
-        hashmap<int,int>::Tuple t = m.lookup(i);
-        assert(t.status && t.value == i);
+    for (int i = 0; i < params->number_to_insert; ++i) {
+        hashmap<int,int>::Tuple t = m.lookup(KEY(id, i));
+        assert(t.status && t.value == KEY(id, i));
     }
-
+    for (int i = 0; i < params->number_to_remove; ++i) { // remove number_to_remove
+        bool st = m.remove(KEY(id, i),id);
+        hashmap<int,int>::Tuple t = m.lookup(KEY(id, i));
+        assert(st && !t.status);
+    }
     pthread_exit(nullptr);
     return nullptr;
 }
 
-
-void test04() {
+void test07() {
+    static const int num_threads = 2; // when test passes okay increase to 8 todo
     hashmap<int, int> m{};
+    pthread_t threads[num_threads];
+    struct thread_data td[num_threads];
 
-    pthread_t threads[NUM_THREADS];
-    struct thread_data td[NUM_THREADS];
-    int rc;
-    int i;
-
-    for (i = 0; i < NUM_THREADS; i++) {
-        cout << "test1() : creating thread, " << i << endl;
-        td[i] = {i, rand() % 10, &m, rand() % 100};
-        rc = pthread_create(&threads[i], nullptr, test04_thread, (void *) &td[i]);
-
-        if (rc) {
-            cout << "Error: unable to create thread," << rc << endl;
-            exit(-1);
+    for (int id = 0; id < num_threads; ++id) {
+//        td[id] = {id, &m, 20 + rand() % 70, rand() % 10}; // upgrade this test using this line todo
+        td[id] = {id, &m, 5, 2};
+        int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
+        assert(rc == 0); // Error: unable to create thread
+    }
+    for (unsigned long thread : threads) {
+        int ret = pthread_join(thread, nullptr);
+        assert(ret == 0);
+    }
+    for (int id = 0; id < num_threads; ++id) {
+        for (int j = 0; j < td[id].number_to_remove; ++j) {
+            hashmap<int,int>::Tuple t = m.lookup(KEY(id, j));
+            assert(!t.status); // check removed ok
+        }
+        for (int j = td[id].number_to_remove; j < td[id].number_to_insert; ++j) {
+            hashmap<int,int>::Tuple t = m.lookup(KEY(id, j));
+            assert(t.status && t.value == KEY(id, j)); // check stayed okay
         }
     }
-    pthread_exit(nullptr);
+    cout << "Test #07 Passed!" << endl;
+}
+
+void test06() {
+    static const int num_threads = 8; // when test passes okay increase to 8 todo
+    hashmap<int, int> m{};
+    pthread_t threads[num_threads];
+    struct thread_data td[num_threads];
+
+    for (int id = 0; id < num_threads; ++id) {
+        td[id] = {id, &m, 30, 10};
+        int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
+        assert(rc == 0); // Error: unable to create thread
+        int ret = pthread_join(threads[id], nullptr);
+        assert(ret == 0);
+    }
+    for (int id = 0; id < num_threads; ++id) {
+        for (int j = 0; j < td[id].number_to_remove; ++j) {
+            hashmap<int,int>::Tuple t = m.lookup(KEY(id, j));
+            assert(!t.status); // check removed ok
+        }
+        for (int j = td[id].number_to_remove; j < td[id].number_to_insert; ++j) {
+            hashmap<int,int>::Tuple t = m.lookup(KEY(id, j));
+            assert(t.status && t.value == KEY(id, j)); // check stayed okay
+        }
+    }
+    cout << "Test #06 Passed!" << endl;
+}
+
+
+void test05() {
+    static const int num_threads = 2; // when test passes okay increase to 8 todo
+    hashmap<int, int> m{};
+
+    pthread_t threads[num_threads];
+    struct thread_data td[num_threads];
+
+    for (int id = 0; id < num_threads; ++id) {
+//        td[id] = {id, &m, 30 + rand() % 60, -1}; // upgrade this test using this line todo
+        td[id] = {id, &m, 80, -1};
+        int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
+        assert(rc == 0); // Error: unable to create thread
+    }
+    for (unsigned long thread : threads) {
+        int ret = pthread_join(thread, nullptr);
+        assert(ret == 0);
+    }
+    for (int id = 0; id < num_threads; ++id) {
+        for (int j = 0; j < td[id].number_to_insert; ++j) {
+            hashmap<int,int>::Tuple t = m.lookup(KEY(id, j));
+            assert(t.status && t.value == KEY(id, j));
+        }
+    }
+    cout << "Test #05 Passed!" << endl;
+}
+
+void test04() {
+    static const int num_threads = 8;
+    hashmap<int, int> m{};
+
+    pthread_t threads[num_threads];
+    struct thread_data td[num_threads];
+
+    for (int id = 0; id < num_threads; ++id) {
+        td[id] = {id, &m, 15, -1};
+        int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
+        assert(rc == 0); // Error: unable to create thread
+        int ret = pthread_join(threads[id], nullptr);
+        assert(ret == 0);
+    }
+    for (int id = 0; id < num_threads; ++id) {
+        for (int j = 0; j < td[id].number_to_insert; ++j) {
+            hashmap<int,int>::Tuple t = m.lookup(KEY(id, j));
+            assert(t.status && t.value == KEY(id, j));
+        }
+    }
+    cout << "Test #04 Passed!" << endl;
 }
 
 void test03() {
@@ -65,9 +154,9 @@ void test03() {
     for (int i = 0; i < test_len; ++i) {
         hashmap<int,int>::Tuple t = m.lookup(i);
         assert(t.status && t.value == i);
-        m.remove(i,0);
+        bool st = m.remove(i,0);
         t = m.lookup(i);
-        assert(!t.status);
+        assert(st && !t.status);
     }
 //    m.DebugPrintDir(); // todo: remove op enlarges the dir.. should it happen?
     cout << "Test #03 Passed!" << endl;
@@ -75,17 +164,15 @@ void test03() {
 
 void test02() {
     hashmap<int, int> m{};
-    int test_len = 27; // todo: 27 is okay, 28 and higher makes problems
+    int test_len = 143;
     for (int i = 0; i < test_len; ++i) {
         bool st = m.insert(i,i, 0);
         assert(st);
     }
-//    m.DebugPrintDir();
     for (int i = 0; i < test_len; ++i) {
         hashmap<int,int>::Tuple t = m.lookup(i);
         assert(t.status && t.value == i);
     }
-//    m.DebugPrintDir();
     cout << "Test #02 Passed!" << endl;
 }
 
@@ -117,8 +204,11 @@ int main() {
     cout << "Hello Efficient Wait-Free Resizable HashMap!" << endl;
     test01(); // test without threads and without resize
     test02(); // test without threads and with resize
-    test03(); // test without threads and with resize and remove
-//    test04(); // test with threads
+    test03(); // test without threads and with resize and remove // todo check if dir should increase when remove
+    test04(); // test insert with threads running separately
+    test05(); // test insert with threads running in parallel // todo code fails when parallel
+//    test06(); // test remove with threads running separately
+//    test07(); // test remove with threads running in parallel
     return 0;
 }
 
