@@ -9,7 +9,7 @@
 #define NUMBER_OF_THREADS (64)
 #define NOT_FOUND (-1)
 #define FULL_BUCKET (-1)
-#define BIGWORD_SIZE (16)
+#define BIGWORD_SIZE (16 * 8)
 #define POW(exp) ((unsigned)1 << (unsigned)(exp))
 #define SIZE_OF_HASH (32)
 
@@ -81,23 +81,12 @@ class hashmap {
 
         ~BigWord() = default;
 
-        void setBit(unsigned int id) {
-            Data[id/8] |= (int8_t)(1 << (id % 8));
-        }
-
-        void clearBit(unsigned int id){
-            Data[id/8] &= (uint8_t)~(1 << (id % 8));
-        }
-
         bool testBit(unsigned int id) const {
-            return ((Data[id/8] & (1 << (id % 8))) != 0);
+            return Data[id];
         }
 
         void flipBit(const unsigned int id) {
-            if(this->testBit(id))
-                clearBit(id);
-            else
-                setBit(id);
+            Data[id] = !Data[id];
         }
     };
 
@@ -116,10 +105,10 @@ class hashmap {
             for (int i = 0; i < NUMBER_OF_THREADS; i++)
                 this->results[i] = old.results[i];
         };
-        BState(const Result* const r, BigWord const& bw) : items(), applied(bw) {
+        BState(const Result* const res, BigWord const& applied) : items(), applied(applied) {
             // this is a special constructor.
             for (int i = 0; i < NUMBER_OF_THREADS; i++)
-                this->results[i] = r[i];
+                this->results[i] = res[i];
         }
         BState operator=(BState b) = delete; // we can implement assignment constructor if we will need to, but it cannot be the default so for now so it's blocked
 
@@ -163,12 +152,7 @@ class hashmap {
             this->state.store(new BState(), std::memory_order_relaxed);
         }
 
-        Bucket(const Bucket &b) : prefix(b.prefix), depth(b.depth), toggle(b.toggle) {
-            this->state.store(new BState(*(b.state.load(std::memory_order_relaxed))), std::memory_order_relaxed);
-        } // this is the copy constructor
-
-        explicit Bucket(uint32_t p, size_t d, volatile std::atomic<BState*> s, BigWord t) :
-                prefix(p), depth(d), state(s), toggle(t){}
+        Bucket(const Bucket &b) = delete;
 
         explicit Bucket(uint32_t p, size_t d, BState* s, BigWord t) : prefix(p), depth(d), toggle(t){
             this->state.store(s, std::memory_order_relaxed);
@@ -195,7 +179,6 @@ class hashmap {
             dir[1]->depth = 1;
             dir[0]->prefix = 0;
             dir[1]->prefix = 1;
-
         }
 
         inline size_t getDepth() {
@@ -206,7 +189,7 @@ class hashmap {
             dir = new Bucket*[POW(depth)];
             for (int i = 0; i < POW(depth); i++) {
                 assert(d.dir[i]);
-                dir[i] = new Bucket(*(d.dir[i]));
+                dir[i] = d.dir[i];
                 while (i+1 < POW(depth) && d.dir[i] == d.dir[i+1]) {
                     dir[i+1] = dir[i];
                     i++;
@@ -255,10 +238,9 @@ class hashmap {
         for (int i = 0; i < 2; i++) {
             oldBState = b->state.load(std::memory_order_relaxed); // this is the most efficient access, it is suppose to work since the algo already covers all the cases
             newBState = new BState(*oldBState); // copy constructor, pointer assignment
-            newBState->applied = BigWord(); // ADDED 11/05/2020
             oldToggle = b->toggle; // copy constructor using operator=
 
-            for (unsigned int j = 0; (j <= NUMBER_OF_THREADS); j++) {
+            for (unsigned int j = 0; j <= NUMBER_OF_THREADS; j++) {
                 if (oldToggle.testBit(j) == newBState->applied.testBit(j)) continue;
                 assert(newBState->results[j].seqnum >= 0 && help[j]->seqnum > 0);
                 if (newBState->results[j].seqnum < help[j]->seqnum) {
@@ -270,9 +252,12 @@ class hashmap {
 
             newBState->applied = oldToggle; // copy constructor using operator=
 
-            if (std::atomic_compare_exchange_weak<BState*>(&b->state, &oldBState,  newBState)) {}
+            if (std::atomic_compare_exchange_weak<BState*>(&b->state, &oldBState,  newBState)) {
 //                delete oldBState; // TODO: smart pointers?
-//            } else delete newBState;
+            } else {
+                std::cout << "";
+//                delete newBState;
+            }
         }
     }
 
@@ -317,8 +302,8 @@ class hashmap {
         Bucket **res = new Bucket*[2];
         BState* const bs0 = new BState(bs->results, b->toggle); // special constructor
         BState* const bs1 = new BState(bs->results, b->toggle);
-        res[0] = new Bucket((b->prefix << 1) + 0, b->depth + 1, bs0, BigWord());
-        res[1] = new Bucket((b->prefix << 1) + 1, b->depth + 1, bs1, BigWord());
+        res[0] = new Bucket((b->prefix << 1) + 0, b->depth + 1, bs0, b->toggle);
+        res[1] = new Bucket((b->prefix << 1) + 1, b->depth + 1, bs1, b->toggle);
 
         // split the items between the new buckets:
         for (int i = 0; i < BUCKET_SIZE; ++i) {
@@ -390,7 +375,9 @@ class hashmap {
 
             if (std::atomic_compare_exchange_weak<DState*>(&ht, &oldD,  newD)) {
 //                delete oldD; // TODO: smart pointers?
-            } else delete newD;
+            } else {
+                delete newD;
+            }
         }
     }
 
@@ -403,7 +390,7 @@ class hashmap {
     }
 
     uint32_t Prefix(size_t hash, uint32_t const depth, uint32_t start) const {
-        assert(SIZE_OF_HASH - start - depth > 0); //BUG
+        assert(start >= depth);
 
         uint32_t mask = (uint32_t)((1 << (start)) - 1); // mask for the first (start) bits
         auto prefix = (uint32_t)(hash & mask) << (SIZE_OF_HASH - start) >> (SIZE_OF_HASH - depth); // clear bits bigger than start and smaller than depth
@@ -446,7 +433,8 @@ public:
     }
 
     bool insert(Key const &key, Value const &value, unsigned int const id) {
-
+start_insert:
+        assert(0 <= id && id < NUMBER_OF_THREADS);
         opSeqnum[id]++;
         const void* kptr = &key;
         xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
@@ -464,8 +452,7 @@ public:
 
         htl = (ht.load(std::memory_order_relaxed));
         const BState &bstate2 = *(htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(std::memory_order_relaxed));
-        if (bstate2.results[id].status != TRUE)
-            std::cout << "\n## ERROR INSERTING " << key << "! ##\n"; // for debugging test05
+        if (bstate2.results[id].status != TRUE) goto start_insert;
         return (bstate2.results[id].status == TRUE);
     }
 
@@ -491,6 +478,7 @@ public:
     }
 
     bool remove(Key const &key, unsigned int const id) {
+        assert(0 <= id && id < NUMBER_OF_THREADS);
         opSeqnum[id]++;
         const void* kptr = &key;
         xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
@@ -506,7 +494,7 @@ public:
             ResizeWF();
 
         htl = (ht.load(std::memory_order_relaxed));
-        bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
+        bstate = htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(std::memory_order_relaxed);
         return (bstate->results[id].status == TRUE);
     }
 

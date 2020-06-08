@@ -3,7 +3,7 @@
 #include <pthread.h>
 #include <unistd.h> // for sleep
 
-#define KEY(id, k) (id * 100 + k)
+#define KEY(id, k) (id * 1000 + k)
 
 using namespace std;
 
@@ -22,11 +22,13 @@ void *test04_thread(void *threadarg) {
     int id = params->thread_id;
 
     for (int i = 0; i < params->number_to_insert; ++i) {
+//        while (!m.insert(KEY(id, i),KEY(id, i), id));
         bool st = m.insert(KEY(id, i),KEY(id, i), id);
         assert(st);
     }
     for (int i = 0; i < params->number_to_insert; ++i) {
         hashmap<int,int>::Tuple t = m.lookup(KEY(id, i));
+        if (!t.status) cout << "## ERROR FINDING " << KEY(id, i) << "! ##\n"; // for debugging
         assert(t.status && t.value == KEY(id, i));
     }
     for (int i = 0; i < params->number_to_remove; ++i) { // remove number_to_remove
@@ -95,7 +97,7 @@ void test06() {
 
 
 void test05() {
-    static const int num_threads = 2; // when test passes okay increase to 8 todo
+    static const int num_threads = 8; // when test passes okay increase to 8 todo
     hashmap<int, int> m{};
 
     pthread_t threads[num_threads];
@@ -103,7 +105,7 @@ void test05() {
 
     for (int id = 0; id < num_threads; ++id) {
 //        td[id] = {id, &m, 30 + rand() % 60, -1}; // upgrade this test using this line todo
-        td[id] = {id, &m, 80, -1};
+        td[id] = {id, &m, 900, -1};
         int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
         assert(rc == 0); // Error: unable to create thread
     }
@@ -145,12 +147,11 @@ void test04() {
 
 void test03() {
     hashmap<int, int> m{};
-    int test_len = 3;
+    int test_len = 315;
     for (int i = 0; i < test_len; ++i) {
         bool st = m.insert(i,i, 0);
         assert(st);
     }
-//    m.DebugPrintDir();
     for (int i = 0; i < test_len; ++i) {
         hashmap<int,int>::Tuple t = m.lookup(i);
         assert(t.status && t.value == i);
@@ -158,7 +159,6 @@ void test03() {
         t = m.lookup(i);
         assert(st && !t.status);
     }
-//    m.DebugPrintDir(); // todo: remove op enlarges the dir.. should it happen?
     cout << "Test #03 Passed!" << endl;
 }
 
@@ -166,7 +166,7 @@ void test02() {
     hashmap<int, int> m{};
     int test_len = 143;
     for (int i = 0; i < test_len; ++i) {
-        bool st = m.insert(i,i, 0);
+        bool st = m.insert(i, i, 0);
         assert(st);
     }
     for (int i = 0; i < test_len; ++i) {
