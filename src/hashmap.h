@@ -61,20 +61,28 @@ class hashmap {
     };
 
     struct BigWord {
-        uint8_t Data[BIGWORD_SIZE];
+//        uint8_t Data[BIGWORD_SIZE];
+        volatile std::atomic<bool> Data_p[BIGWORD_SIZE];
 
     public:
-        BigWord() : Data() {}
-
-        BigWord(BigWord const& b) : Data() {
-            for (int i = 0; i < BIGWORD_SIZE; ++i) {
-                this->Data[i] = b.Data[i];
+        BigWord() : Data_p() {
+            for (auto &i : Data_p) {
+                i.store(0, std::memory_order_relaxed);
             }
         }
 
-        BigWord& operator=(BigWord const& b) {
-            for (int i = 0; i < BIGWORD_SIZE; ++i) {
-                this->Data[i] = b.Data[i];
+        BigWord(BigWord const &b) : Data_p() {
+            for (int i = 0; i < BIGWORD_SIZE; i++) {
+                Data_p[i].store(b.Data_p[i].load(std::memory_order_relaxed),
+                                std::memory_order_relaxed);
+            }
+        }
+
+        BigWord &operator=(BigWord const &b) {
+            for (int i = 0; i < BIGWORD_SIZE; i++) {
+                this->Data_p[i].store(
+                        b.Data_p[i].load(std::memory_order_relaxed),
+                        std::memory_order_relaxed);
             }
             return *this;
         }
@@ -82,11 +90,13 @@ class hashmap {
         ~BigWord() = default;
 
         bool testBit(unsigned int id) const {
-            return Data[id];
+            return Data_p[id].load(std::memory_order_relaxed);
+//            return Data[id];
         }
 
         void flipBit(const unsigned int id) {
-            Data[id] = !Data[id];
+            Data_p[id].store(!Data_p[id].load(std::memory_order_relaxed),
+                             std::memory_order_relaxed);
         }
     };
 
@@ -266,7 +276,7 @@ class hashmap {
         int freeID = 0;
         Triple *temp;
 
-        freeID = (b->BucketFull());
+        freeID = b->BucketFull();
         if (freeID == FULL_BUCKET) {
             return FAIL;
         }
@@ -318,13 +328,15 @@ class hashmap {
         return res;
     }
 
-    void DirectoryUpdate(DState &d, Bucket* const *blist) {
+    void DirectoryUpdate(DState &d, Bucket* const *blist, Bucket* const old_bucket) {
         int b_index = 0;
         if (blist[b_index]->depth > d.depth) d.EnlargeDir();
         for (size_t e = 0; e < POW(d.depth); ++e) {
             // maybe use binary search somehow instead of moving one by one at begin?
             if (Prefix(e, blist[b_index]->depth, d.depth) == blist[b_index]->prefix) {
                 // TODO: when need to delete old bucket? complicated
+                assert(d.dir[e]->state.load(std::memory_order_relaxed)->BucketFull() == FULL_BUCKET);
+                assert(old_bucket == d.dir[e]);
                 d.dir[e] = blist[b_index];
                 if (e + 1 < POW(d.depth) && Prefix(e+1, blist[b_index]->depth, d.depth) != blist[b_index]->prefix) {
                     if (b_index == 0) b_index++; // blist[1] will always be right after blist[0]
@@ -344,7 +356,7 @@ class hashmap {
                     BState *bsDest = bDest->state.load(std::memory_order_relaxed);
                     while (bsDest->BucketFull() == FULL_BUCKET) {
                         Bucket** const splitted = SplitBucket(bDest);
-                        DirectoryUpdate(d, splitted);
+                        DirectoryUpdate(d, splitted, bDest);
 //                        delete bDest; // TODO: smart pointers?
                         delete[] splitted;
                         bDest = d.dir[Prefix(help[j]->hash, d.depth)];
@@ -367,7 +379,7 @@ class hashmap {
                 if (help[j]) { // different from the paper cause we might have (help[j] == nullptr)
                     Bucket *b = newD->dir[Prefix(help[j]->hash, newD->depth)];
                     BState *bs = (b->state.load(std::memory_order_relaxed));
-                    if (bs->BucketFull() && bs->results[j].seqnum < help[j]->seqnum) {
+                    if (bs->BucketFull() == FULL_BUCKET && bs->results[j].seqnum < help[j]->seqnum) {
                         ApplyPendingResize(*newD, *b);
                     }
                 }
@@ -399,7 +411,7 @@ class hashmap {
 
 public:
 
-    hashmap() :  help(){
+    hashmap() : help() {
         ht.store(new DState(), std::memory_order_relaxed);
         for (int &i : opSeqnum) i = 0;
     };
@@ -428,12 +440,12 @@ public:
             // TODO: what if the BState gets deleted while this search?
             if (t && t->key == key) return {true, t->value};
         }
-//        this->DebugPrintDir(); // for debugging test05
+//        this->DebugPrintDir();
         return {false, 0};
     }
 
     bool insert(Key const &key, Value const &value, unsigned int const id) {
-start_insert:
+//start_insert:
         assert(0 <= id && id < NUMBER_OF_THREADS);
         opSeqnum[id]++;
         const void* kptr = &key;
@@ -452,7 +464,7 @@ start_insert:
 
         htl = (ht.load(std::memory_order_relaxed));
         const BState &bstate2 = *(htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(std::memory_order_relaxed));
-        if (bstate2.results[id].status != TRUE) goto start_insert;
+//        if (bstate2.results[id].status != TRUE) goto start_insert;
         return (bstate2.results[id].status == TRUE);
     }
 
@@ -497,6 +509,8 @@ start_insert:
         bstate = htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(std::memory_order_relaxed);
         return (bstate->results[id].status == TRUE);
     }
+
+    int getDepth() { return ht.load(std::memory_order_relaxed)->depth; }
 
 };
 
