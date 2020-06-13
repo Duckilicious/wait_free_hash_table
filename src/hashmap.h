@@ -307,7 +307,7 @@ class hashmap {
     }
 
     Bucket** SplitBucket(Bucket *b) { // returns 2 new Buckets
-        const BState *bs = new BState(*(b->state.load(std::memory_order_relaxed))); // copied, todo: delete or smart pointers
+        const BState *bs = (b->state.load(std::memory_order_relaxed)); // copied, todo: delete or smart pointers
         // init 2 new Buckets:
         Bucket **res = new Bucket*[2];
         BState* const bs0 = new BState(bs->results, b->toggle); // special constructor
