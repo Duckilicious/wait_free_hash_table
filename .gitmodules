@@ -1,0 +1,3 @@
+[submodule "xxHash"]
+	path = xxHash
+	url = C:/Users/Tal/Desktop/study_and_shit/parller_hashtable/c_impl/xxHash/
