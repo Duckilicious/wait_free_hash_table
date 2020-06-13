@@ -1,0 +1,3 @@
+[submodule "c_impl/xxHash"]
+	path = c_impl/xxHash
+	url = https://github.com/Cyan4973/xxHash.git
