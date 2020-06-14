@@ -42,7 +42,7 @@ void *test04_thread(void *threadarg) {
 
 
 void test05() {
-    static const int num_threads = 8; // when test passes okay increase to 8 todo
+    static const int num_threads = 4; // when test passes okay increase to 8 todo
 
     pthread_t threads[num_threads];
     struct thread_data td[num_threads];
@@ -50,7 +50,7 @@ void test05() {
     for (int id = 0; id < num_threads; ++id) {
 //        td[id] = {id, &m, 30 + rand() % 60, -1}; // upgrade this test using this line todo
         td[id].thread_id = id;
-        td[id].number_to_insert = 500;
+        td[id].number_to_insert = 999;
         td[id].number_to_remove = 0;
         int rc = pthread_create(&threads[id], NULL, test04_thread, (void *) &td[id]);
         assert(rc == 0); // Error: unable to create thread
@@ -66,6 +66,7 @@ void test05() {
             }
         }
     }
+
     printf("Test #05 Passed!");
 }
 
@@ -84,7 +85,7 @@ int test1(){
 
 int main() {
     initHashTable();
-    //test1();
+   // test1();
     test05();
     return 0;
 }

@@ -38,7 +38,7 @@ struct Result {
 
 struct Bstate {
     struct item items[SIZE_OF_BUCKET];
-    bool applied[MAX_NUM_OF_THREADS];
+    int applied[MAX_NUM_OF_THREADS];
     struct Result results[MAX_NUM_OF_THREADS];
 };
 
@@ -46,7 +46,7 @@ struct Bucket {
     int prefix;
     int depth;
     struct Bstate* BState_p;
-    bool toggle[MAX_NUM_OF_THREADS];
+    int toggle[MAX_NUM_OF_THREADS];
 };
 
 struct Dstate {
@@ -69,9 +69,9 @@ enum status_ht ExecOnBucket(struct Bstate* bs, struct Operation* op);
 
 void ResizeWF();
 
-void ApplyPendingResize(struct Dstate* d, struct Bucket* bFull);
+bool ApplyPendingResize(struct Dstate* d, struct Bucket* bFull);
 
-void DirectoryUpdate(struct Dstate* d, struct Bucket** barr);
+void DirectoryUpdate(struct Dstate* d, struct Bucket** barr, struct Bucket* btemp);
 
 struct Bucket** SplitBucket(struct Bucket* b);
 
