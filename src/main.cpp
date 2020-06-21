@@ -3,7 +3,8 @@
 #include <pthread.h>
 #include <unistd.h> // for sleep
 
-#define KEY(id, k) (id * 1000 + k)
+#define MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST (1000)
+#define KEY(id, k) (id * MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST + k)
 
 using namespace std;
 
@@ -20,33 +21,24 @@ void *test04_thread(void *threadarg) {
     hashmap<int, int> &m = *(params->m); // reference assignment (no constructor)
     int id = params->thread_id;
 
+    int failures_of_insert = 0;
+    assert(params->number_to_insert < MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST);
     for (int i = 0; i < params->number_to_insert; ++i) {
-        int d = m.getDepth();
-//        while (!m.insert(KEY(id, i),KEY(id, i), id));
-        bool st = m.insert(KEY(id, i),KEY(id, i), id);
-        assert(st); // todo: sometime fails: is it okay that insert will fail?
-
-        std::pair<bool, int> t = m.lookup(KEY(id, i));
-        if (!t.first) {
-                cout << "## ERROR FINDING " << KEY(id, i) << "! ## Old_d: " << d << " New_d: " << m.getDepth() << endl; // for debugging
-                /*int key = KEY(id, i);
-                const void* kptr = &key;
-                xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(int)));
-                cout << hashed_key << endl;
-                m.DebugPrintDir();
-                cin >> key;*/
-        }
-    }/*
+        while (!m.insert(KEY(id, i),KEY(id, i), id)) ++failures_of_insert;
+//        bool st = m.insert(KEY(id, i),KEY(id, i), id);
+//        assert(st); // todo: sometime fails: is it okay that insert will fail?
+    }
     for (int i = 0; i < params->number_to_insert; ++i) {
         std::pair<bool, int> t = m.lookup(KEY(id, i));
         if (!t.first) cout << "## ERROR FINDING " << KEY(id, i) << "! ##\n"; // for debugging
         assert(t.first && t.second == KEY(id, i));
-    }*/
+    }
     for (int i = 0; i < params->number_to_remove; ++i) { // remove number_to_remove
         bool st = m.remove(KEY(id, i),id);
         std::pair<bool, int> t = m.lookup(KEY(id, i));
         assert(st && !t.first);
     }
+    if (failures_of_insert) cout << "number of insert that failed: " << failures_of_insert << ", from id: " << id << endl;
     pthread_exit(nullptr);
     return nullptr;
 }
@@ -58,8 +50,8 @@ void test07() {
     struct thread_data td[num_threads];
 
     for (int id = 0; id < num_threads; ++id) {
-//        td[id] = {id, &m, 20 + rand() % 70, rand() % 10}; // upgrade this test using this line todo
-        td[id] = {id, &m, 5, 2};
+//        td[id] = {id, &m, 40 + rand() % 150, rand() % 30}; // upgrade this test using this line todo
+        td[id] = {id, &m, 40, 20};
         int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
         assert(rc == 0); // Error: unable to create thread
     }
@@ -81,13 +73,13 @@ void test07() {
 }
 
 void test06() {
-    static const int num_threads = 8; // when test passes okay increase to 8 todo
+    static const int num_threads = 8;
     hashmap<int, int> m{};
     pthread_t threads[num_threads];
     struct thread_data td[num_threads];
 
     for (int id = 0; id < num_threads; ++id) {
-        td[id] = {id, &m, 30, 10};
+        td[id] = {id, &m, 150, 50};
         int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
         assert(rc == 0); // Error: unable to create thread
         int ret = pthread_join(threads[id], nullptr);
@@ -106,17 +98,15 @@ void test06() {
     cout << "Test #06 Finished!" << endl;
 }
 
-
 void test05() {
-    static const int num_threads = 2; // when test passes okay increase to 8 todo
+    static const int num_threads = 8;
     hashmap<int, int> m{};
 
     pthread_t threads[num_threads];
     struct thread_data td[num_threads];
 
     for (int id = 0; id < num_threads; ++id) {
-//        td[id] = {id, &m, 30 + rand() % 800, -1}; // upgrade this test using this line todo
-        td[id] = {id, &m, 100, -1};
+        td[id] = {id, &m, (rand() % 800) + 70, -1};
         int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
         assert(rc == 0); // Error: unable to create thread
     }
@@ -128,7 +118,7 @@ void test05() {
         for (int j = 0; j < td[id].number_to_insert; ++j) {
             std::pair<bool, int> t = m.lookup(KEY(id, j));
             if (!t.first) {
-//                cout << "## ERROR FINDING " << KEY(id, j) << "! ##\n"; // for debugging
+                cout << "## ERROR FINDING " << KEY(id, j) << "! ##\n"; // for debugging
                 /*int key = KEY(id, j);
                 const void* kptr = &key;
                 xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(int)));
@@ -136,7 +126,7 @@ void test05() {
                 m.DebugPrintDir();
                 return;*/
             }
-//            assert(t.first && t.second == KEY(id, j));
+            assert(t.first && t.second == KEY(id, j));
         }
     }
     cout << "Test #05 Finished!" << endl;
@@ -206,16 +196,16 @@ void test01() {
     for (int i = 0; i < test_len; ++i) {
         std::pair<bool, int> t = m.lookup(i);
         assert(t.first && t.second == i);
-//        m.remove(i,0);
-//        t = m.lookup(i);
-//        assert(!t.first);
+        m.remove(i,0);
+        t = m.lookup(i);
+        assert(!t.first);
     }
-//    for (int i = 0; i < test_len; ++i) {
-//        std::pair<bool, int> t = m.lookup(i);
-//        assert(!t.first);
-//        m.remove(i,0);
-//        assert(!t.first);
-//    }
+    for (int i = 0; i < test_len; ++i) {
+        std::pair<bool, int> t = m.lookup(i);
+        assert(!t.first);
+        m.remove(i,0);
+        assert(!t.first);
+    }
     cout << "Test #01 Finished!" << endl;
 }
 
@@ -223,11 +213,11 @@ int main() {
     cout << "Hello Efficient Wait-Free Resizable Hash Table!" << endl;
     test01(); // test without threads and without resize
     test02(); // test without threads and with resize
-//    test03(); // test without threads and with resize and remove
+    test03(); // test without threads and with resize and remove
     test04(); // test insert with threads running separately
-    test05(); // test insert with threads running in parallel // todo code fails when parallel
-//    test06(); // test remove with threads running separately
-//    test07(); // test remove with threads running in parallel
+    test05(); // test insert with threads running in parallel
+    test06(); // test remove with threads running separately
+//    test07(); // test remove with threads running in parallel // todo code fails when parallel
 
     return 0;
 }

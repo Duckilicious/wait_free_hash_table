@@ -24,7 +24,7 @@ template<typename Key, typename Value>
 class hashmap {
     // private:
     enum Status_type {
-        TRUE, FALSE, FAIL
+        FALSE, TRUE, FAIL
     };
 
     struct Triple {
@@ -339,22 +339,24 @@ class hashmap {
 
     void ApplyPendingResize(DState &d, Bucket const &bFull) {
         for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
-            if (help[j] && Prefix(help[j]->hash, bFull.depth) == bFull.prefix) {
+            Operation const *temp_help_j = help[j]; // NEW :: NOT LIKE THE PAPER
+            if (temp_help_j && Prefix(temp_help_j->hash, bFull.depth) == bFull.prefix) {
                 BState const &bs = *(bFull.state.load(std::memory_order_relaxed));
-                assert(bs.results[j].seqnum >= 0 && help[j]->seqnum >= 0);
-                if (bs.results[j].seqnum < help[j]->seqnum) {
-                    Bucket *bDest = d.dir[Prefix(help[j]->hash, d.depth)];
+                assert(bs.results[j].seqnum >= 0 && temp_help_j->seqnum >= 0);
+                if (bs.results[j].seqnum < temp_help_j->seqnum) {
+                    Bucket *bDest = d.dir[Prefix(temp_help_j->hash, d.depth)];
                     BState *bsDest = bDest->state.load(std::memory_order_relaxed);
                     while (bsDest->BucketAvailability() == FULL_BUCKET) {
                         Bucket **const splitted = SplitBucket(bDest);
                         DirectoryUpdate(d, splitted, bDest);
 //                        delete bDest; // fix this
                         delete[] splitted;
-                        bDest = d.dir[Prefix(help[j]->hash, d.depth)];
+                        bDest = d.dir[Prefix(temp_help_j->hash, d.depth)];
                         bsDest = bDest->state.load(std::memory_order_relaxed);
                     }
-                    bsDest->results[j].status = ExecOnBucket(bsDest, *help[j]);
-                    bsDest->results[j].seqnum = help[j]->seqnum;
+//                    assert(help[j]->seqnum == temp_help_j->seqnum); // TODO: why this assert fails?
+                    bsDest->results[j].status = ExecOnBucket(bsDest, *temp_help_j);
+                    bsDest->results[j].seqnum = temp_help_j->seqnum;
                 }
             }
         }
@@ -369,7 +371,7 @@ class hashmap {
             for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
                 if (help[j]) { // different from the paper cause we might have (help[j] == nullptr)
                     Bucket *b = newD->dir[Prefix(help[j]->hash, newD->depth)];
-                    BState *bs = (b->state.load(std::memory_order_relaxed));
+                    BState const *bs = (b->state.load(std::memory_order_relaxed));
                     // TODO: help array needs to be atomic?
                     if (bs->BucketAvailability() == FULL_BUCKET && bs->results[j].seqnum < help[j]->seqnum) {
                         ApplyPendingResize(*newD, *b);
@@ -426,7 +428,7 @@ public:
         xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
         DState *htl = (ht.load(std::memory_order_relaxed));
         size_t hash_prefix = Prefix(hashed_key, htl->getDepth());
-        BState *bs = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
+        BState const *bs = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
         for (Triple *t : bs->items) {
             // TODO: what if the BState gets deleted while this search?
             if (t && t->key == key) return {true, t->value};
@@ -436,7 +438,6 @@ public:
     }
 
     bool insert(Key const &key, Value const &value, unsigned int const id) {
-//start_insert:
         assert(0 <= id && id < NUMBER_OF_THREADS);
         opSeqnum[id]++;
         const void *kptr = &key;
@@ -448,15 +449,15 @@ public:
         ApplyWFOp(htl->dir[hash_prefix], id);
 
         htl = (ht.load(std::memory_order_relaxed));
-        const BState &bstate = *(htl->dir[hash_prefix]->state.load(std::memory_order_relaxed));
-        assert(bstate.results[id].seqnum >= 0 && opSeqnum[id] >= 0);
-        if (bstate.results[id].seqnum != opSeqnum[id])
+        const BState *bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
+        assert(bstate->results[id].seqnum >= 0 && opSeqnum[id] >= 0);
+        if (bstate->results[id].seqnum != opSeqnum[id])
             ResizeWF();
 
         htl = (ht.load(std::memory_order_relaxed));
-        const BState &bstate2 = *(htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(std::memory_order_relaxed));
-//        if (bstate2.results[id].status != TRUE) goto start_insert;
-        return (bstate2.results[id].status == TRUE);
+        bstate = htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(std::memory_order_relaxed);
+        return (bstate->results[id].seqnum == opSeqnum[id]); // NEW :: DIFFERENT FROM THE PAPER
+//        return (bstate->results[id].status == TRUE);
     }
 
     void DebugPrintDir() const {
@@ -497,13 +498,14 @@ public:
         ApplyWFOp(htl->dir[hash_prefix], id);
 
         htl = (ht.load(std::memory_order_relaxed));
-        BState *bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
+        BState const *bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
         if (bstate->results[id].seqnum != opSeqnum[id])
             ResizeWF();
 
         htl = (ht.load(std::memory_order_relaxed));
         bstate = htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(std::memory_order_relaxed);
-        return (bstate->results[id].status == TRUE);
+        return (bstate->results[id].seqnum == opSeqnum[id]); // NEW :: DIFFERENT FROM THE PAPER
+//        return (bstate->results[id].status == TRUE);
     }
 
     int getDepth() const {
