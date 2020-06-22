@@ -3,7 +3,7 @@
 #include <pthread.h>
 #include <unistd.h> // for sleep
 
-#define MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST (1000)
+#define MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST (10000000)
 #define KEY(id, k) (id * MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST + k)
 
 using namespace std;
@@ -99,14 +99,14 @@ void test06() {
 }
 
 void test05() {
-    static const int num_threads = 8;
+    static const int num_threads = 16;
     hashmap<int, int> m{};
 
     pthread_t threads[num_threads];
     struct thread_data td[num_threads];
 
     for (int id = 0; id < num_threads; ++id) {
-        td[id] = {id, &m, (rand() % 800) + 70, -1};
+        td[id] = {id, &m, 100000, -1};
         int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
         assert(rc == 0); // Error: unable to create thread
     }
@@ -211,12 +211,12 @@ void test01() {
 
 int main() {
     cout << "Hello Efficient Wait-Free Resizable Hash Table!" << endl;
-    test01(); // test without threads and without resize
-    test02(); // test without threads and with resize
-    test03(); // test without threads and with resize and remove
-    test04(); // test insert with threads running separately
+//    test01(); // test without threads and without resize
+//    test02(); // test without threads and with resize
+//    test03(); // test without threads and with resize and remove
+//    test04(); // test insert with threads running separately
     test05(); // test insert with threads running in parallel
-    test06(); // test remove with threads running separately
+//    test06(); // test remove with threads running separately
 //    test07(); // test remove with threads running in parallel // todo code fails when parallel
 
     return 0;

@@ -5,7 +5,7 @@
 #ifndef EWRHT_HASHMAP_H
 #define EWRHT_HASHMAP_H
 
-#define BUCKET_SIZE (2)
+#define BUCKET_SIZE (500)
 #define NUMBER_OF_THREADS (64)
 #define NOT_FOUND (-1)
 #define FULL_BUCKET (-1)
@@ -147,7 +147,7 @@ class hashmap {
             return NOT_FOUND;
         }
 
-        ~BState() = delete; // fix this
+        ~BState() = default; // fix this
     };
 
     struct Bucket {
@@ -217,10 +217,7 @@ class hashmap {
         }
 
         ~DState() {
-            for (int i = 0; i < POW(depth); i++) {
-                // if (dir[i]) delete *(dir[i]);
-            }
-//            delete[] dir; // fix this
+            delete dir;
         }
     };
 
@@ -257,9 +254,9 @@ class hashmap {
             newBState->applied = oldToggle; // copy constructor using operator=
 
             if (std::atomic_compare_exchange_weak<BState *>(&b->state, &oldBState, newBState)) {
-//                delete oldBState; // fix this
+                //   delete oldBState; // fix this
             } else {
-//                delete newBState;
+                    delete newBState;
             }
         }
     }
@@ -273,7 +270,7 @@ class hashmap {
         if (freeID == FULL_BUCKET) {
             return FAIL;
         } else {
-            //Delete
+            //Remove
             if (op.type == DEL) {
                 delete b->items[updateID];
                 b->items[updateID] = nullptr;
@@ -380,7 +377,6 @@ class hashmap {
             }
 
             if (std::atomic_compare_exchange_weak<DState *>(&ht, &oldD, newD)) {
-//                delete oldD; // fix this
             } else {
                 delete newD;
             }
@@ -439,25 +435,28 @@ public:
 
     bool insert(Key const &key, Value const &value, unsigned int const id) {
         assert(0 <= id && id < NUMBER_OF_THREADS);
+        const BState *bstate;
         opSeqnum[id]++;
         const void *kptr = &key;
         xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
         help[id] = new Operation(INS, key, value, opSeqnum[id], hashed_key);
-        DState *htl = (ht.load(std::memory_order_relaxed));
-        uint32_t hash_prefix = Prefix(hashed_key, htl->getDepth());
+        do {
+            DState *htl = (ht.load(std::memory_order_relaxed));
+            uint32_t hash_prefix = Prefix(hashed_key, htl->getDepth());
 
-        ApplyWFOp(htl->dir[hash_prefix], id);
+            ApplyWFOp(htl->dir[hash_prefix], id);
 
-        htl = (ht.load(std::memory_order_relaxed));
-        const BState *bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
-        assert(bstate->results[id].seqnum >= 0 && opSeqnum[id] >= 0);
-        if (bstate->results[id].seqnum != opSeqnum[id])
-            ResizeWF();
+            htl = (ht.load(std::memory_order_relaxed));
+            bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
+            assert(bstate->results[id].seqnum >= 0 && opSeqnum[id] >= 0);
+            if (bstate->results[id].seqnum != opSeqnum[id])
+                ResizeWF();
 
-        htl = (ht.load(std::memory_order_relaxed));
-        bstate = htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(std::memory_order_relaxed);
-        return (bstate->results[id].seqnum == opSeqnum[id]); // NEW :: DIFFERENT FROM THE PAPER
-//        return (bstate->results[id].status == TRUE);
+            htl = (ht.load(std::memory_order_relaxed));
+            bstate = htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(std::memory_order_relaxed);
+           }
+        while ((bstate->results[id].seqnum != opSeqnum[id]));
+        return true;
     }
 
     void DebugPrintDir() const {
