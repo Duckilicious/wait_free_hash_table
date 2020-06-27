@@ -3,7 +3,7 @@
 #include <pthread.h>
 #include <unistd.h> // for sleep
 
-#define MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST (10000000)
+#define MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST (10000)
 #define KEY(id, k) (id * MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST + k)
 
 using namespace std;
@@ -15,18 +15,19 @@ struct thread_data {
     int number_to_remove;
 };
 
-void *test04_thread(void *threadarg) {
+bool start_the_threads_global_flag;
+
+void *thead_function(void *threadarg) {
     struct thread_data *params;
     params = (struct thread_data *) threadarg;
     hashmap<int, int> &m = *(params->m); // reference assignment (no constructor)
     int id = params->thread_id;
 
-    int failures_of_insert = 0;
     assert(params->number_to_insert < MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST);
+    while (!start_the_threads_global_flag);
     for (int i = 0; i < params->number_to_insert; ++i) {
-        while (!m.insert(KEY(id, i),KEY(id, i), id)) ++failures_of_insert;
-//        bool st = m.insert(KEY(id, i),KEY(id, i), id);
-//        assert(st); // todo: sometime fails: is it okay that insert will fail?
+        bool st = m.insert(KEY(id, i),KEY(id, i), id);
+        assert(st);
     }
     for (int i = 0; i < params->number_to_insert; ++i) {
         std::pair<bool, int> t = m.lookup(KEY(id, i));
@@ -35,26 +36,25 @@ void *test04_thread(void *threadarg) {
     }
     for (int i = 0; i < params->number_to_remove; ++i) { // remove number_to_remove
         bool st = m.remove(KEY(id, i),id);
-        std::pair<bool, int> t = m.lookup(KEY(id, i));
-        assert(st && !t.first);
+        assert(st);
     }
-    if (failures_of_insert) cout << "number of insert that failed: " << failures_of_insert << ", from id: " << id << endl;
     pthread_exit(nullptr);
     return nullptr;
 }
 
 void test07() {
-    static const int num_threads = 2; // when test passes okay increase to 8 todo
+    start_the_threads_global_flag = false;
+    static const int num_threads = 8;
     hashmap<int, int> m{};
     pthread_t threads[num_threads];
     struct thread_data td[num_threads];
 
     for (int id = 0; id < num_threads; ++id) {
-//        td[id] = {id, &m, 40 + rand() % 150, rand() % 30}; // upgrade this test using this line todo
-        td[id] = {id, &m, 40, 20};
-        int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
+        td[id] = {id, &m, 700 + rand() % 200, 500 + rand() % 150};
+        int rc = pthread_create(&threads[id], nullptr, thead_function, (void *) &td[id]);
         assert(rc == 0); // Error: unable to create thread
     }
+    start_the_threads_global_flag = true;
     for (unsigned long thread : threads) {
         int ret = pthread_join(thread, nullptr);
         assert(ret == 0);
@@ -73,14 +73,15 @@ void test07() {
 }
 
 void test06() {
+    start_the_threads_global_flag = true;
     static const int num_threads = 8;
     hashmap<int, int> m{};
     pthread_t threads[num_threads];
     struct thread_data td[num_threads];
 
     for (int id = 0; id < num_threads; ++id) {
-        td[id] = {id, &m, 150, 50};
-        int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
+        td[id] = {id, &m, 300, 200};
+        int rc = pthread_create(&threads[id], nullptr, thead_function, (void *) &td[id]);
         assert(rc == 0); // Error: unable to create thread
         int ret = pthread_join(threads[id], nullptr);
         assert(ret == 0);
@@ -99,6 +100,7 @@ void test06() {
 }
 
 void test05() {
+    start_the_threads_global_flag = false;
     static const int num_threads = 16;
     hashmap<int, int> m{};
 
@@ -106,10 +108,12 @@ void test05() {
     struct thread_data td[num_threads];
 
     for (int id = 0; id < num_threads; ++id) {
-        td[id] = {id, &m, 100000, -1};
-        int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
+//        td[id] = {id, &m, (rand() % 800) + 70, -1};
+        td[id] = {id, &m, 9000, -1};
+        int rc = pthread_create(&threads[id], nullptr, thead_function, (void *) &td[id]);
         assert(rc == 0); // Error: unable to create thread
     }
+    start_the_threads_global_flag = true;
     for (unsigned long thread : threads) {
         int ret = pthread_join(thread, nullptr);
         assert(ret == 0);
@@ -133,6 +137,7 @@ void test05() {
 }
 
 void test04() {
+    start_the_threads_global_flag = true;
     static const int num_threads = 8;
     hashmap<int, int> m{};
 
@@ -141,7 +146,7 @@ void test04() {
 
     for (int id = 0; id < num_threads; ++id) {
         td[id] = {id, &m, 300, -1};
-        int rc = pthread_create(&threads[id], nullptr, test04_thread, (void *) &td[id]);
+        int rc = pthread_create(&threads[id], nullptr, thead_function, (void *) &td[id]);
         assert(rc == 0); // Error: unable to create thread
         int ret = pthread_join(threads[id], nullptr);
         assert(ret == 0);
@@ -189,7 +194,7 @@ void test02() {
 void test01() {
     hashmap<int, int> m{};
     const int test_len = BUCKET_SIZE;
-        for (int i = 0; i < test_len; ++i) {
+    for (int i = 0; i < test_len; ++i) {
         bool st = m.insert(i,i, 0);
         assert(st);
     }
@@ -211,13 +216,14 @@ void test01() {
 
 int main() {
     cout << "Hello Efficient Wait-Free Resizable Hash Table!" << endl;
-//    test01(); // test without threads and without resize
-//    test02(); // test without threads and with resize
-//    test03(); // test without threads and with resize and remove
-//    test04(); // test insert with threads running separately
+    start_the_threads_global_flag = true;
+    test01(); // test without threads and without resize
+    test02(); // test without threads and with resize
+    test03(); // test without threads and with resize and remove
+    test04(); // test insert with threads running separately
     test05(); // test insert with threads running in parallel
-//    test06(); // test remove with threads running separately
-//    test07(); // test remove with threads running in parallel // todo code fails when parallel
+    test06(); // test remove with threads running separately
+    test07(); // test remove with threads running in parallel
 
     return 0;
 }
