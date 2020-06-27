@@ -20,7 +20,7 @@
 #include "xxhash/include/xxhash.hpp"
 
 
-// value must have default constructor: Value()
+// Key & Value must have default constructor: Key() & Value()
 template<typename Key, typename Value>
 class hashmap {
     // private:
@@ -29,16 +29,19 @@ class hashmap {
     };
 
     struct Triple {
+        bool valid_item;
         xxh::hash_t<32> hash;
         Key key;
         Value value;
 
+        Triple() : valid_item(false) {}
+
         Triple(xxh::hash_t<32> h, Key k, Value v) :
-                hash(h), key(k), value(v) {};
+                valid_item(true), hash(h), key(k), value(v) {};
     };
 
     enum Op_type {
-        INS, DEL
+        NONE, INS, DEL
     };
 
     struct Operation {
@@ -47,6 +50,8 @@ class hashmap {
         Value value;
         int seqnum;
         xxh::hash_t<32> hash;
+
+        Operation() : type(NONE) {}
 
         Operation(Op_type t, Key k, Value v, int seq, xxh::hash_t<32> h) :
                 type(t), key(k), value(v), seqnum(seq), hash(h) {};
@@ -91,7 +96,7 @@ class hashmap {
     };
 
     struct BState {
-        Triple *items[BUCKET_SIZE]; // if pointer = nullptr place is free
+        Triple items[BUCKET_SIZE]; // if (item_valid == false) place is free
         Result results[NUMBER_OF_THREADS]; // array size n
         BigWord applied; // bit array of size 128
 
@@ -115,9 +120,9 @@ class hashmap {
 
         BState operator=(BState b) = delete;
 
-        bool InsertItem(Triple *const t) {
-            for (Triple *&item : items) {
-                if (!item) {
+        bool InsertItem(Triple const t) {
+            for (Triple &item : items) {
+                if (!item.valid_item) {
                     item = t;
                     return true;
                 }
@@ -128,7 +133,7 @@ class hashmap {
         int BucketAvailability() const {
             // Returns the free entry if exists, else -1 for full bucket
             for (int i = 0; i < BUCKET_SIZE; i++) {
-                if (this->items[i] == nullptr)
+                if (!this->items[i].valid_item)
                     return i;
             }
             return FULL_BUCKET;
@@ -136,7 +141,7 @@ class hashmap {
 
         int GetItem(Triple const &c) const {
             for (int i = 0; i < BUCKET_SIZE; i++) {
-                if (items[i] && c.key == items[i]->key)
+                if (items[i].valid_item && c.key == items[i].key)
                     return i;
             }
             return NOT_FOUND;
@@ -219,7 +224,7 @@ class hashmap {
 
     /*** Global variables of the class goes below: ***/
     volatile std::atomic<DState *> ht;
-    Operation *help[NUMBER_OF_THREADS];
+    Operation help[NUMBER_OF_THREADS];
     unsigned long long opSeqnum[NUMBER_OF_THREADS]{}; // This will be an array of size N and each thread will only access to its memory space
 
     /*** Inner function section goes below: ***/
@@ -227,23 +232,21 @@ class hashmap {
 
     void ApplyWFOp(Bucket *b, unsigned int id) {
         BigWord oldToggle;
-        BState *oldBState, *nextBState;
-
         b->toggle.FlipBit(id); // mark as worked on by thread id
 
         for (int i = 0; i < 2; i++) {
-            oldBState = b->state.load(std::memory_order_relaxed);
-            nextBState = new BState(*oldBState); // copy constructor, pointer assignment
+            BState *oldBState = b->state.load(std::memory_order_relaxed);
+            BState *nextBState = new BState(*oldBState); // copy constructor, pointer assignment
             oldToggle = b->toggle; // copy constructor using operator=
 
             for (unsigned int j = 0; j <= NUMBER_OF_THREADS; j++) {
                 if (oldToggle.TestBit(j) == nextBState->applied.TestBit(j))
                     continue;
-                assert(nextBState->results[j].seqnum >= 0 && help[j]->seqnum > 0);
-                if (nextBState->results[j].seqnum < help[j]->seqnum) {
-                    nextBState->results[j].status = ExecOnBucket(nextBState, *help[j]);
+                assert(nextBState->results[j].seqnum >= 0 && help[j].seqnum > 0);
+                if (nextBState->results[j].seqnum < help[j].seqnum) {
+                    nextBState->results[j].status = ExecOnBucket(nextBState, help[j]);
                     if (nextBState->results[j].status != FAIL)
-                        nextBState->results[j].seqnum = help[j]->seqnum;
+                        nextBState->results[j].seqnum = help[j].seqnum;
                 }
             }
             nextBState->applied = oldToggle; // copy constructor using operator=
@@ -262,13 +265,12 @@ class hashmap {
         if (freeID == FULL_BUCKET) {
             return FAIL;
         } else {
-            auto *c = new Triple(op.hash, op.key, op.value);
-            int updateID = b->GetItem(*c);
+            Triple c(op.hash, op.key, op.value);
+            int updateID = b->GetItem(c);
             // case remove
             if (op.type == DEL) {
                 if (updateID != NOT_FOUND) {
-//                    delete b->items[updateID]; // should be deleted with GC
-                    b->items[updateID] = nullptr;
+                    b->items[updateID].valid_item = false;
                 }
                 return TRUE;
             }
@@ -279,9 +281,7 @@ class hashmap {
                 }
             } else {
                 if (op.type == INS) {
-                    Triple *temp = b->items[updateID];
                     b->items[updateID] = c;
-//                    delete temp; // should be deleted with GC
                 }
             }
         }
@@ -299,9 +299,9 @@ class hashmap {
 
         // split the items between the next buckets:
         for (int i = 0; i < BUCKET_SIZE; ++i) {
-            assert(bs->items[i]); // bucket should be full for splitting
+            assert(bs->items[i].valid_item); // bucket should be full for splitting
             bool inserted_ok = false; // here for debugging
-            if (Prefix(bs->items[i]->hash, res[0]->depth) == res[0]->prefix)
+            if (Prefix(bs->items[i].hash, res[0]->depth) == res[0]->prefix)
                 inserted_ok = bs0->InsertItem(bs->items[i]);
             else
                 inserted_ok = bs1->InsertItem(bs->items[i]);
@@ -329,24 +329,24 @@ class hashmap {
 
     void ApplyPendingResize(DState &d, Bucket const &bFull) {
         for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
-            Operation const *temp_help_j = help[j]; // NEW :: NOT LIKE THE PAPER
-            if (temp_help_j && Prefix(temp_help_j->hash, bFull.depth) == bFull.prefix) {
+            Operation const temp_help_j = help[j]; // assignment constructor
+            if (temp_help_j.type != NONE && Prefix(temp_help_j.hash, bFull.depth) == bFull.prefix) {
                 BState const &bs = *(bFull.state.load(std::memory_order_relaxed));
-                assert(bs.results[j].seqnum >= 0 && temp_help_j->seqnum >= 0);
-                if (bs.results[j].seqnum < temp_help_j->seqnum) {
-                    Bucket *bDest = d.dir[Prefix(temp_help_j->hash, d.depth)];
+                assert(bs.results[j].seqnum >= 0 && temp_help_j.seqnum >= 0);
+                if (bs.results[j].seqnum < temp_help_j.seqnum) {
+                    Bucket *bDest = d.dir[Prefix(temp_help_j.hash, d.depth)];
                     BState *bsDest = bDest->state.load(std::memory_order_relaxed);
                     while (bsDest->BucketAvailability() == FULL_BUCKET) {
                         Bucket **const splitted = SplitBucket(bDest);
                         DirectoryUpdate(d, splitted, bDest);
 //                        delete bDest; // fix this
                         delete[] splitted;
-                        bDest = d.dir[Prefix(temp_help_j->hash, d.depth)];
+                        bDest = d.dir[Prefix(temp_help_j.hash, d.depth)];
                         bsDest = bDest->state.load(std::memory_order_relaxed);
                     }
 //                    assert(help[j]->seqnum == temp_help_j->seqnum); // TODO: why this assert fails?
-                    bsDest->results[j].status = ExecOnBucket(bsDest, *temp_help_j);
-                    bsDest->results[j].seqnum = temp_help_j->seqnum;
+                    bsDest->results[j].status = ExecOnBucket(bsDest, temp_help_j);
+                    bsDest->results[j].seqnum = temp_help_j.seqnum;
                 }
             }
         }
@@ -359,10 +359,10 @@ class hashmap {
             assert(nextD->dir[0]);
 
             for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
-                if (help[j]) { // different from the paper cause we might have (help[j] == nullptr)
-                    Bucket *b = nextD->dir[Prefix(help[j]->hash, nextD->depth)];
+                if (help[j].type != NONE) { // different from the paper cause we might have invalid op at help[j]
+                    Bucket *b = nextD->dir[Prefix(help[j].hash, nextD->depth)];
                     BState const *bs = (b->state.load(std::memory_order_relaxed));
-                    if (bs->BucketAvailability() == FULL_BUCKET && bs->results[j].seqnum < help[j]->seqnum) {
+                    if (bs->BucketAvailability() == FULL_BUCKET && bs->results[j].seqnum < help[j].seqnum) {
                         ApplyPendingResize(*nextD, *b);
                     }
                 }
@@ -424,9 +424,10 @@ class hashmap {
 
 public:
 
-    hashmap() : help() {
+    hashmap() {
         ht.store(new DState(), std::memory_order_relaxed);
         for (unsigned long long &i : opSeqnum) i = 0;
+//        for (Operation &op : help) op.type = NONE;
     };
 
     hashmap(hashmap &) = delete;
@@ -445,8 +446,8 @@ public:
         DState *htl = (ht.load(std::memory_order_relaxed));
         size_t hash_prefix = Prefix(hashed_key, htl->getDepth());
         BState const *bs = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
-        for (Triple *t : bs->items) {
-            if (t && t->key == key) return {true, t->value};
+        for (Triple t : bs->items) {
+            if (t.valid_item && t.key == key) return {true, t.value};
         }
         return {false, Value()};
     }
@@ -456,7 +457,7 @@ public:
         ++opSeqnum[id];
         const void *kptr = &key;
         xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
-        help[id] = new Operation(INS, key, value, opSeqnum[id], hashed_key);
+        help[id] = Operation(INS, key, value, opSeqnum[id], hashed_key);
         return MakeOp(hashed_key, id);
     }
 
@@ -491,7 +492,7 @@ public:
         ++opSeqnum[id];
         const void *kptr = &key;
         xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
-        help[id] = new Operation(DEL, key, opSeqnum[id], hashed_key);
+        help[id] = Operation(DEL, key, opSeqnum[id], hashed_key);
         return MakeOp(hashed_key, id);
     }
 
