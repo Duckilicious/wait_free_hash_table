@@ -16,9 +16,15 @@
 #include <iostream> // for debugging
 #include <atomic>
 #include <cassert>
+#include <memory>
 #include <bitset> // TODO using for the print only
 #include "xxhash/include/xxhash.hpp"
 
+
+using std::atomic;
+using std::shared_ptr;
+using std::memory_order_relaxed;
+using std::atomic_compare_exchange_weak;
 
 // Key & Value must have default constructor: Key() & Value()
 template<typename Key, typename Value>
@@ -235,7 +241,7 @@ class hashmap {
         b->toggle.FlipBit(id); // mark as worked on by thread id
 
         for (int i = 0; i < 2; i++) {
-            BState *oldBState = b->state.load(std::memory_order_relaxed);
+            BState *oldBState = b->state.load(memory_order_relaxed);
             BState *nextBState = new BState(*oldBState); // copy constructor, pointer assignment
             oldToggle = b->toggle; // copy constructor using operator=
 
@@ -251,7 +257,7 @@ class hashmap {
             }
             nextBState->applied = oldToggle; // copy constructor using operator=
 
-            if (std::atomic_compare_exchange_weak<BState *>(&b->state, &oldBState, nextBState)) {
+            if (atomic_compare_exchange_weak<BState *>(&b->state, &oldBState, nextBState)) {
                 //   delete oldBState; // fix this
             } else {
                     delete nextBState;
@@ -289,7 +295,7 @@ class hashmap {
     }
 
     Bucket **SplitBucket(Bucket *const b) { // returns 2 new Buckets
-        const BState *const bs = b->state.load(std::memory_order_relaxed);
+        const BState *const bs = b->state.load(memory_order_relaxed);
         // init and allocate 2 Buckets:
         Bucket **res = new Bucket *[2];
         BState *const bs0 = new BState(bs->results, b->toggle); // special constructor
@@ -316,7 +322,7 @@ class hashmap {
         for (size_t e = 0; e < POW(d.depth); ++e) {
             // TODO: maybe use old_bucket somehow instead of moving one by one from zero?
             if (Prefix(e, blist[b_index]->depth, d.depth) == blist[b_index]->prefix) {
-                assert(d.dir[e]->state.load(std::memory_order_relaxed)->BucketAvailability() == FULL_BUCKET);
+                assert(d.dir[e]->state.load(memory_order_relaxed)->BucketAvailability() == FULL_BUCKET);
                 assert(old_bucket == d.dir[e]);
                 d.dir[e] = blist[b_index];
                 if (e + 1 < POW(d.depth) && Prefix(e + 1, blist[b_index]->depth, d.depth) != blist[b_index]->prefix) {
@@ -331,18 +337,18 @@ class hashmap {
         for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
             Operation const temp_help_j = help[j]; // assignment constructor
             if (temp_help_j.type != NONE && Prefix(temp_help_j.hash, bFull.depth) == bFull.prefix) {
-                BState const &bs = *(bFull.state.load(std::memory_order_relaxed));
+                BState const &bs = *(bFull.state.load(memory_order_relaxed));
                 assert(bs.results[j].seqnum >= 0 && temp_help_j.seqnum >= 0);
                 if (bs.results[j].seqnum < temp_help_j.seqnum) {
                     Bucket *bDest = d.dir[Prefix(temp_help_j.hash, d.depth)];
-                    BState *bsDest = bDest->state.load(std::memory_order_relaxed);
+                    BState *bsDest = bDest->state.load(memory_order_relaxed);
                     while (bsDest->BucketAvailability() == FULL_BUCKET) {
                         Bucket **const splitted = SplitBucket(bDest);
                         DirectoryUpdate(d, splitted, bDest);
 //                        delete bDest; // fix this
                         delete[] splitted;
                         bDest = d.dir[Prefix(temp_help_j.hash, d.depth)];
-                        bsDest = bDest->state.load(std::memory_order_relaxed);
+                        bsDest = bDest->state.load(memory_order_relaxed);
                     }
 //                    assert(help[j]->seqnum == temp_help_j->seqnum); // TODO: why this assert fails?
                     bsDest->results[j].status = ExecOnBucket(bsDest, temp_help_j);
@@ -354,21 +360,21 @@ class hashmap {
 
     void ResizeWF() {
         for (int k = 0; k < 2; ++k) {
-            DState *oldD = ht.load(std::memory_order_relaxed);
+            DState *oldD = ht.load(memory_order_relaxed);
             DState *nextD = new DState(*oldD);
             assert(nextD->dir[0]);
 
             for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
                 if (help[j].type != NONE) { // different from the paper cause we might have invalid op at help[j]
                     Bucket *b = nextD->dir[Prefix(help[j].hash, nextD->depth)];
-                    BState const *bs = (b->state.load(std::memory_order_relaxed));
+                    BState const *bs = (b->state.load(memory_order_relaxed));
                     if (bs->BucketAvailability() == FULL_BUCKET && bs->results[j].seqnum < help[j].seqnum) {
                         ApplyPendingResize(*nextD, *b);
                     }
                 }
             }
 
-            if (std::atomic_compare_exchange_weak<DState *>(&ht, &oldD, nextD)) {
+            if (atomic_compare_exchange_weak<DState *>(&ht, &oldD, nextD)) {
                 return;
             } else {
                 delete nextD;
@@ -402,19 +408,19 @@ class hashmap {
         const BState *bstate;
         int run_times = 0;
         do {
-            DState *htl = (ht.load(std::memory_order_relaxed));
+            DState *htl = (ht.load(memory_order_relaxed));
             uint32_t hash_prefix = Prefix(hashed_key, htl->getDepth());
 
             ApplyWFOp(htl->dir[hash_prefix], id);
 
-            htl = (ht.load(std::memory_order_relaxed));
-            bstate = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
+            htl = (ht.load(memory_order_relaxed));
+            bstate = htl->dir[hash_prefix]->state.load(memory_order_relaxed);
             assert(bstate->results[id].seqnum >= 0 && opSeqnum[id] >= 0);
             if (bstate->results[id].seqnum != opSeqnum[id])
                 ResizeWF();
 
-            htl = ht.load(std::memory_order_relaxed);
-            bstate = htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(std::memory_order_relaxed);
+            htl = ht.load(memory_order_relaxed);
+            bstate = htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(memory_order_relaxed);
             ++run_times;
         }
         while (bstate->results[id].seqnum != opSeqnum[id]);
@@ -425,7 +431,7 @@ class hashmap {
 public:
 
     hashmap() {
-        ht.store(new DState(), std::memory_order_relaxed);
+        ht.store(new DState(), memory_order_relaxed);
         for (unsigned long long &i : opSeqnum) i = 0;
 //        for (Operation &op : help) op.type = NONE;
     };
@@ -435,7 +441,7 @@ public:
     hashmap operator=(hashmap) = delete;
 
     ~hashmap() {
-        DState *d = ht.load(std::memory_order_relaxed);
+        DState *d = ht.load(memory_order_relaxed);
         // fix this
         delete d;
     }
@@ -443,9 +449,9 @@ public:
     std::pair<bool, Value> lookup(Key const &key) const &{
         const void *kptr = &key;
         xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
-        DState *htl = (ht.load(std::memory_order_relaxed));
+        DState *htl = (ht.load(memory_order_relaxed));
         size_t hash_prefix = Prefix(hashed_key, htl->getDepth());
-        BState const *bs = htl->dir[hash_prefix]->state.load(std::memory_order_relaxed);
+        BState const *bs = htl->dir[hash_prefix]->state.load(memory_order_relaxed);
         for (Triple t : bs->items) {
             if (t.valid_item && t.key == key) return {true, t.value};
         }
@@ -463,9 +469,9 @@ public:
 
     void DebugPrintDir() const {
         std::cout << std::endl;
-        auto htl = ht.load(std::memory_order_relaxed);
+        auto htl = ht.load(memory_order_relaxed);
         for (int i = 0; i < POW(htl->depth); i++) {
-            BState *bs = htl->dir[i]->state.load(std::memory_order_relaxed);
+            BState *bs = htl->dir[i]->state.load(memory_order_relaxed);
             std::cout << "Entries: [" << i << ",";
             while (i + 1 < POW(htl->depth) && htl->dir[i] == htl->dir[i + 1])
                 i++;
