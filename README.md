@@ -1,0 +1,59 @@
+# Wait Free Extendible Hash Table
+
+This repository contains an implementation of a wait free extendible hash table based on the following paper: [WFEXT](https://tropars.github.io/downloads/pdf/publications/spaa2018-FKR-WF_ext_hashing.pdf).
+
+#### How it works
+We will present a brief explanation on how this DS works:
+There are 3 levels of hierarchy in this DS, DState, Buckets and BStates:
+
+ - **DState** - Is the top level of the hierarchy it is essentially an array of pointers to buckets where each pointer is treated as a string of bits, we hold a global pointer to the in use DState at all times.
+ - **Bucket** - Is the second in hierarchy and it contains a pointer to a BState, two status arrays which are use for the algorithm behind the DS, and is represented by 
+a prefix of the bits that represent the pointer from the DState that points to it.
+- **BState** - This is the last structure in the hierarchy and is where the user data will be stored. It contains a fixed size array of the user data, and similarly to the Bucket it also contains two fixed sised status arrays. 
+- 
+Another important part of this DS is the help array which is an idea presented in [this paper](https://arxiv.org/pdf/1911.01676.pdf). Briefly explained it is used by a worker thread that is currently performing an operation on a bucket to do the work of another thread who was assigned to perform an operation on the same bucket.
+
+To perform an operation we first announce it by assigning it to a thread slot in the help array. After that the thread which inerted the operation tries to perform it.
+We will describe the insert operation, the delete is similiar, and the lookup is trivial because of the way the algorithem works.
+When a thread tries to insert a new item to a BState after it was announced it first finds the correct Bucket to insert it according to the key of the item inserted.
+In the case where the BState isn't full it will copy the last BState, will add the item to the local copy, and will use atomic CAS to try and update the Bucket and it will announce in the help array that it has finished the operation so that another thread won't try to execute it as well.
+
+In the case where the BState is full the thread will try to split the Bucket as long as we need so we will have space for the new item , if the Bucket cannot be splitted it means the the DState is too small, and we will then begin the resizing operation of the table. A thread will create a local copy of a DState that is double the size of the last once it saw, and will copy the entire directory into the new DState, and will then try to atomic CAS the old DState with the new one.
+
+For a much more detailed information please read the the paper linked above.
+
+//TODO add a good picture
+
+#### Differnces from the paper
+There are two main differnce in our implementation than what the paper describes the first is in the end of the operations insert/delete we don't return the value of the status in the result array in BState, but instead we check if the seqnum in the relevant result array slot is the same as the one in OperationSeqnum. 
+We found that without this we get false positives on failed operation.
+
+The second differnce that in the paper it is implied the insert can fail, we found that if insert fails (and from are tests it fails rarely) that there a few easy to spot race conditions, for e.g. Let say there are two threads, T1 and T2. T1 tries to insert and fails, in the meanwhile T2 is executing on the same bucket the T1 has failed on so it sees the operation T1 has tried to perform, T2 then finds the operation and sends it to ExecOnBucket in applied ApplyWFOp at and after that a new operation is inserted into the help array by T1, this will cause T2 to insert/remove a item to the Bucket it found thus harming the algorithm correctness.
+
+So in our implementation we don't allow a thread to fail an operation, it doesn't mean that it must be the same thread that has announced it that should perform it, but we don't allow it to announce another operation until that one he already announced is done.
+
+#### Libraried used
+
+We used shared_ptr and it's array functionality in C++ 17 and also [XXhash](https://github.com/Cyan4973/xxHash) is used as the hash function and the C++ implementation is done in C++ 17, so C++ 17 is a must to use this project.
+
+#### Compiling
+
+to compile this project including our tests simply run in the src/ folder:
+
+```sh 
+$ g++ -pthread -std=c++17 tests.cpp
+```
+To use this in your own project simply add to your headers
+
+```sh
+$ #include #include "hashmap.h"
+```
+
+
+#### API
+
+
+#### Benchmarks
+
+
+
