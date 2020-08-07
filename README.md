@@ -27,12 +27,12 @@ The following picture is taken from the paper, and demonstrate the case of resiz
 ![resize_example](https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/resize_example.PNG)
 
 #### Differnces from the paper
-There are two main differnce in our implementation than what the paper describes the first is in the end of the operations insert/delete we don't return the value of the status in the result array in BState, but instead we check if the seqnum in the relevant result array slot is the same as the one in OperationSeqnum. 
+There are two main differnce in our implementation than what the paper describes the first is in the end of the operations insert/delete we don't return the value of the status in the results array in BState, but instead we check if the seqnum in the relevant result array slot is the same as the one in OperationSeqnum. 
 We found that without this we get false positives on failed operation.
 
-The second differnce that in the paper it is implied the insert can fail, we found that if insert fails (and from are tests it fails rarely) that there a few easy to spot race conditions, for e.g. Let say there are two threads, T1 and T2. T1 tries to insert and fails, in the meanwhile T2 is executing on the same bucket the T1 has failed on so it sees the operation T1 has tried to perform, T2 then finds the operation and sends it to ExecOnBucket in applied ApplyWFOp at and after that a new operation is inserted into the help array by T1, this will cause T2 to insert/remove a item to the Bucket it found thus harming the algorithm correctness.
+The second differnce that in the paper it is implied the insert can fail, we found that if insert fails (and from our expierements it does fail occasionally) there is a race condition. Let us demonstrate: Let T1 and T2 be two independent threads performing operations on the DS. T1 preforms insert and fails, in the meanwhile T2 is executing on the same bucket that T1 has failed on so it sees the operation T1 has failed to perform, T2 then executes the failed operation by sending it to ExecOnBucket in applied ApplyWFOp. During the execution of that operations a new operation to insert another element, but this time to a different bucket, is inserted into the help array by T1, this will cause T2 to insert an item to the wrong Bucket thus harming the algorithm correctness.
 
-So in our implementation we don't allow a thread to fail an operation, it doesn't mean that it must be the same thread that has announced it that should perform it, but we don't allow it to announce another operation until that one he already announced is done.
+So in our implementation we don't allow a thread to fail an operation, it doesn't mean that it must be the same thread that has announced it that should perform it, but we don't allow it to announce another operation until that one he already announced as done.
 
 #### Dependecies
 
@@ -53,5 +53,5 @@ To use this in your own project simply add to your headers
 
 #### Benchmarks
 
-
+Coming soon.
 
