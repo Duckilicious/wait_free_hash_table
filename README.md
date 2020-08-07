@@ -55,7 +55,6 @@ To use this in your own project simply add to your headers
 
 Let us demonstrate a small example of initating the WFEXT performing an insert , a lookup and a remove.
 
-```sh
 #include "hashmap.h"
 #include <iostream>
 
@@ -71,7 +70,7 @@ int main()  {
     if(!p.first)
         std::cout << "Item was removed successfully";
 }
-'''
+
 #### Benchmarks
 
 Coming soon.
