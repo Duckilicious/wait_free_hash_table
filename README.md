@@ -62,7 +62,7 @@ Let us demonstrate a small example of initating the WFEXT performing an insert ,
 int main()  {
     hashmap<int, int> ht{};
     if(ht.insert(312, 0, 0)) //Key = 312, data = 0, thread_id = 0
-        std::cout << "Entered successfully";
+        std::cout << "Item was inserted successfully";
     std::pair<bool, int> p = ht.lookup(312);
     if(p.first)
         std::cout << "Found data for key 312";
