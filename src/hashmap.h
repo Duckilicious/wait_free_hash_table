@@ -1,7 +1,3 @@
-//
-// Created by Alon on 30/03/2020.
-//
-
 #ifndef EWRHT_HASHMAP_H
 #define EWRHT_HASHMAP_H
 
@@ -19,7 +15,6 @@
 #include <bitset> // TODO using for the print only
 #include "xxhash/include/xxhash.hpp"
 
-//std used functions
 using std::shared_ptr;
 using std::make_shared;
 using std::atomic_compare_exchange_weak;
@@ -246,8 +241,7 @@ class hashmap {
 
         for (int i = 0; i < 2; i++) {
             shared_ptr<BState> oldBState = atomic_load(&b.b_ptr->state);
-            shared_ptr<BState> nextBState(new BState(*oldBState)); // copy
-            // constructor, pointer assignment
+            shared_ptr<BState> nextBState(new BState(*oldBState)); // copy constructor, pointer assignment
             oldToggle = b.b_ptr->toggle; // copy constructor using operator=
 
             for (unsigned int j = 0; j <= NUMBER_OF_THREADS; j++) {
@@ -488,20 +482,6 @@ public:
         help[id] = Operation(DEL, key, opSeqnum[id], hashed_key);
         return MakeOp(hashed_key, id);
     }
-
 };
 
-
 #endif //EWRHT_HASHMAP_H
-
-
-
-
-
-
-
-
-
-
-
-
