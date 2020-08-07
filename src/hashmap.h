@@ -103,8 +103,8 @@ class hashmap {
 
     struct BState {
         Triple items[BUCKET_SIZE]; // if (item_valid == false) place is free
-        Result results[NUMBER_OF_THREADS]; // array size n
-        BigWord applied; // bit array of size 128
+        Result results[NUMBER_OF_THREADS];
+        BigWord applied;
 
     public:
         BState() : items(), results(), applied() {}
@@ -119,7 +119,6 @@ class hashmap {
 
         BState(const Result *const res, BigWord const &applied)
                 : items(), applied(applied) {
-            // this is a special constructor.
             for (int i = 0; i < NUMBER_OF_THREADS; i++)
                 this->results[i] = res[i];
         }
@@ -136,8 +135,8 @@ class hashmap {
             return false; // bucket is full
         }
 
+        /*Returns the free entry if exists, else -1 for full bucket */
         int BucketAvailability() const {
-            // Returns the free entry if exists, else -1 for full bucket
             for (int i = 0; i < BUCKET_SIZE; i++) {
                 if (!this->items[i].valid_item)
                     return i;
@@ -160,7 +159,7 @@ class hashmap {
         uint32_t prefix;
         size_t depth;
         shared_ptr<BState> state;
-        BigWord toggle; // 128 bit array
+        BigWord toggle;
 
     public:
         Bucket() : prefix(), depth(), toggle() {
@@ -181,8 +180,6 @@ class hashmap {
 
     struct Bucket_ptr {
         shared_ptr<Bucket> b_ptr;
-        //Bucket_ptr() : b_ptr(new Bucket()) {};
-        /** Adding operator=(Bucket_ptr&) would make the code cleaner **/
     };
 
     struct DState {
@@ -210,7 +207,6 @@ class hashmap {
             shared_ptr<Bucket_ptr[]> dir_temp(new Bucket_ptr[POW(depth)]);
             dir = dir_temp;
             for (int i = 0; i < POW(depth); i++) {
-//                assert(d.dir[i]);
                 dir[i].b_ptr = d.dir[i].b_ptr;
             }
         }
@@ -232,9 +228,14 @@ class hashmap {
 
 
     /*** Global variables of the class goes below: ***/
+    /**@ht - a pointer to the most recent DState.
+     * @help - an array of size N and each thread will only access its own space.
+     * @opSeqnum - an array of size N each thread holds a counter that represent the
+     * amount of operations it has done.
+     * **/
     shared_ptr<DState> ht;
     Operation help[NUMBER_OF_THREADS];
-    unsigned long long opSeqnum[NUMBER_OF_THREADS]{}; // This will be an array of size N and each thread will only access to its memory space
+    unsigned long long opSeqnum[NUMBER_OF_THREADS]{};
 
     /*** Inner function section goes below: ***/
 
@@ -297,25 +298,22 @@ class hashmap {
 
     shared_ptr<Bucket_ptr[]> SplitBucket(Bucket_ptr const b) { // returns 2 new Buckets
         const shared_ptr<BState> bs = atomic_load(&b.b_ptr->state);
-        // init and allocate 2 Buckets:
         shared_ptr<Bucket_ptr[]> res(new Bucket_ptr[2]);
+
         shared_ptr<BState> bs0(new BState(bs->results, b.b_ptr->toggle));
-        // special constructor
         shared_ptr<BState> bs1(new BState(bs->results, b.b_ptr->toggle));
         shared_ptr<Bucket> res0(new Bucket((b.b_ptr->prefix << 1) + 0, b.b_ptr->depth + 1, bs0, b.b_ptr->toggle));
         shared_ptr<Bucket> res1(new Bucket((b.b_ptr->prefix << 1) + 1, b.b_ptr->depth + 1, bs1, b.b_ptr->toggle));
         res[0].b_ptr = res0;
         res[1].b_ptr = res1;
 
-        // split the items between the next buckets:
+        // split the items between the next buckets
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             assert(bs->items[i].valid_item); // bucket should be full for splitting
-            bool inserted_ok = false; // here for debugging
             if (Prefix(bs->items[i].hash, res[0].b_ptr->depth) == res[0].b_ptr->prefix)
-                inserted_ok = bs0->InsertItem(bs->items[i]);
+                bs0->InsertItem(bs->items[i]);
             else
-                inserted_ok = bs1->InsertItem(bs->items[i]);
-            assert(inserted_ok);
+                bs1->InsertItem(bs->items[i]);
         }
         return res;
     }
@@ -324,10 +322,8 @@ class hashmap {
         int b_index = 0;
         if (blist[b_index].b_ptr->depth > d.depth) d.EnlargeDir();
         for (size_t e = 0; e < POW(d.depth); ++e) {
-            // TODO: maybe use old_bucket somehow instead of moving one by one from zero?
             if (Prefix(e, blist[b_index].b_ptr->depth, d.depth) == blist[b_index].b_ptr->prefix) {
                 assert(atomic_load(&d.dir[e].b_ptr->state)->BucketAvailability() == FULL_BUCKET);
-                //assert(old_bucket == d.dir[e]);
                 d.dir[e] = blist[b_index];
                 if (e + 1 < POW(d.depth) && Prefix(e + 1, blist[b_index].b_ptr->depth, d.depth) != blist[b_index].b_ptr->prefix) {
                     if (b_index == 0) b_index++; // blist[1] will always be right after blist[0]
@@ -352,7 +348,6 @@ class hashmap {
                         bDest = d.dir[Prefix(temp_help_j.hash, d.depth)];
                         bsDest = atomic_load(&bDest.b_ptr->state);
                     }
-//                    assert(help[j]->seqnum == temp_help_j->seqnum); // TODO: why this assert fails?
                     bsDest->results[j].status = ExecOnBucket(bsDest, temp_help_j);
                     bsDest->results[j].seqnum = temp_help_j.seqnum;
                 }
@@ -364,7 +359,6 @@ class hashmap {
         for (int k = 0; k < 2; ++k) {
             shared_ptr<DState> oldD = atomic_load(&ht);
             shared_ptr<DState> nextD(new DState(*oldD));
-            //assert(nextD->dir[0]);
 
             for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
                 if (help[j].type != NONE) { // different from the paper cause we might have invalid op at help[j]
@@ -423,7 +417,6 @@ class hashmap {
             ++run_times;
         }
         while (bstate->results[id].seqnum != opSeqnum[id]);
-//        if (run_times > 1) std::cout << "" << run_times << "-"; // counts the failing ops
         return true;
     }
 
@@ -432,7 +425,6 @@ public:
     hashmap() {
         atomic_store(&ht, make_shared<DState>());
         for (unsigned long long &i : opSeqnum) i = 0;
-//        for (Operation &op : help) op.type = NONE;
     };
 
     hashmap(hashmap &) = delete;
