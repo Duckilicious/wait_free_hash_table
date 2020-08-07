@@ -27,7 +27,7 @@ The following picture is taken from the paper, and demonstrate the case of resiz
 ![resize_example](https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/resize_example.PNG)
 
 #### Differnces from the paper
-There are two main differnce in our implementation than what the paper describes the first is in the end of the operations insert/delete we don't return the value of the status in the results array in BState, but instead we check if the seqnum in the relevant result array slot is the same as the one in OperationSeqnum. 
+There are two main differnces in our implementation than what the paper describes the first is in the end of the operations insert/delete we don't return the value of the status in the results array in BState, but instead we check if the seqnum in the relevant result array slot is the same as the one in OperationSeqnum. 
 We found that without this we get false positives on failed operation.
 
 The second differnce that in the paper it is implied the insert can fail, we found that if insert fails (and from our expierements it does fail occasionally) there is a race condition. Let us demonstrate: Let T1 and T2 be two independent threads performing operations on the DS. T1 preforms insert and fails, in the meanwhile T2 is executing on the same bucket that T1 has failed on so it sees the operation T1 has failed to perform, T2 then executes the failed operation by sending it to ExecOnBucket in applied ApplyWFOp. During the execution of that operations a new operation to insert another element, but this time to a different bucket, is inserted into the help array by T1, this will cause T2 to insert an item to the wrong Bucket thus harming the algorithm correctness.
@@ -50,6 +50,27 @@ To use this in your own project simply add to your headers
 ```sh
 #include "hashmap.h"
 ```
+
+#### Example
+
+Let us demonstrate a small example of initating the WFEXT performing an insert , a lookup and a remove.
+
+```sh
+#include "hashmap.h"
+#include <iostream>
+
+int main()  {
+    hashmap<int, int> ht{};
+    if(ht.insert(312, 0, 0)) //Key = 312, data = 0, thread_id = 0
+        std::cout << "Entered successfully";
+    std::pair<bool, int> p = ht.lookup(312);
+    if(p.first)
+        std::cout << "Found data for key 312";
+    ht.remove(312, 0); //Key = 312, thread_id = 0
+    p = ht.lookup(312);
+    if(!p.first)
+        std::cout << "Item was removed successfully";
+}
 
 #### Benchmarks
 
