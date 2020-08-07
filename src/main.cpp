@@ -3,7 +3,7 @@
 #include <pthread.h>
 #include <unistd.h> // for sleep
 
-#define MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST (10000)
+#define MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST (1000000)
 #define KEY(id, k) (id * MAX_ELEMENTS_PER_THREAD_FOR_COMFORT_TEST + k)
 
 using namespace std;
@@ -138,14 +138,14 @@ void test05() {
 
 void test04() {
     start_the_threads_global_flag = true;
-    static const int num_threads = 8;
+    static const int num_threads = 16;
     hashmap<int, int> m{};
 
     pthread_t threads[num_threads];
     struct thread_data td[num_threads];
 
     for (int id = 0; id < num_threads; ++id) {
-        td[id] = {id, &m, 300, -1};
+        td[id] = {id, &m, 90000, -1};
         int rc = pthread_create(&threads[id], nullptr, thead_function, (void *) &td[id]);
         assert(rc == 0); // Error: unable to create thread
         int ret = pthread_join(threads[id], nullptr);

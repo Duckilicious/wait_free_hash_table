@@ -14,17 +14,17 @@
 #define SIZE_OF_HASH (32)
 
 #include <iostream> // for debugging
-#include <atomic>
 #include <cassert>
 #include <memory>
 #include <bitset> // TODO using for the print only
 #include "xxhash/include/xxhash.hpp"
 
-
-using std::atomic;
+//std used functions
 using std::shared_ptr;
-using std::memory_order_relaxed;
+using std::make_shared;
 using std::atomic_compare_exchange_weak;
+using std::atomic_store;
+using std::atomic_load;
 
 // Key & Value must have default constructor: Key() & Value()
 template<typename Key, typename Value>
@@ -159,42 +159,47 @@ class hashmap {
     struct Bucket {
         uint32_t prefix;
         size_t depth;
-        volatile std::atomic<BState *> state;
+        shared_ptr<BState> state;
         BigWord toggle; // 128 bit array
 
     public:
         Bucket() : prefix(), depth(), toggle() {
-            this->state.store(new BState(), std::memory_order_relaxed);
+            atomic_store(&state, make_shared<BState>());
         }
 
         Bucket(const Bucket &b) = delete;
 
-        explicit Bucket(uint32_t p, size_t d, BState *s, BigWord t)
+        explicit Bucket(uint32_t p, size_t d, shared_ptr<BState> s, BigWord t)
             : prefix(p), depth(d), toggle(t) {
-            this->state.store(s, std::memory_order_relaxed);
+            atomic_store(&state, s);
         }
 
         Bucket operator=(Bucket b) = delete;
 
-        ~Bucket() {
-            delete this->state.load(std::memory_order_relaxed); // fix this
-        }
+        ~Bucket() = default;
+    };
+
+    struct Bucket_ptr {
+        shared_ptr<Bucket> b_ptr;
+        //Bucket_ptr() : b_ptr(new Bucket()) {};
+        /** Adding operator=(Bucket_ptr&) would make the code cleaner **/
     };
 
     struct DState {
         size_t depth;
-        Bucket **dir;  // allocated array with size 2^depth
+        shared_ptr<Bucket_ptr[]> dir;  // Array of shared_ptr
 
     public:
         DState() : depth(1) {
             assert(0 < depth && depth < 20);
-            dir = new Bucket *[POW(depth)];
-            dir[0] = new Bucket();
-            dir[1] = new Bucket();
-            dir[0]->depth = 1;
-            dir[1]->depth = 1;
-            dir[0]->prefix = 0;
-            dir[1]->prefix = 1;
+            shared_ptr<Bucket_ptr[]> dir_temp(new Bucket_ptr[POW(depth)]);
+            dir = dir_temp;
+            for (int i = 0; i < POW(depth); i++) {
+                shared_ptr<Bucket> temp(new Bucket());
+                dir[i].b_ptr = temp;
+                dir[i].b_ptr->depth = 1;
+                dir[i].b_ptr->prefix = i;
+            }
         }
 
         inline size_t getDepth() const {
@@ -202,48 +207,47 @@ class hashmap {
         }
 
         DState(const DState &d) : depth(d.depth) {
-            dir = new Bucket *[POW(depth)];
+            shared_ptr<Bucket_ptr[]> dir_temp(new Bucket_ptr[POW(depth)]);
+            dir = dir_temp;
             for (int i = 0; i < POW(depth); i++) {
-                assert(d.dir[i]);
-                dir[i] = d.dir[i];
+//                assert(d.dir[i]);
+                dir[i].b_ptr = d.dir[i].b_ptr;
             }
         }
 
         DState operator=(DState b) = delete;
 
         void EnlargeDir() {
-            Bucket **next_dir = new Bucket *[POW(depth + 1)]();
+            shared_ptr<Bucket_ptr[]> next_dir(new Bucket_ptr[POW(depth + 1)]);
             for (int i = 0; i < POW(depth); ++i) {
-                next_dir[(i << 1) + 0] = dir[i];
-                next_dir[(i << 1) + 1] = dir[i];
+                next_dir[(i << 1) + 0].b_ptr = dir[i].b_ptr;
+                next_dir[(i << 1) + 1].b_ptr = dir[i].b_ptr;
             }
-//             delete[] dir; // fix this
             dir = next_dir;
             depth++;
         }
 
-        ~DState() {
-//            delete dir;
-        }
+        ~DState() = default;
     };
 
 
     /*** Global variables of the class goes below: ***/
-    volatile std::atomic<DState *> ht;
+    shared_ptr<DState> ht;
     Operation help[NUMBER_OF_THREADS];
     unsigned long long opSeqnum[NUMBER_OF_THREADS]{}; // This will be an array of size N and each thread will only access to its memory space
 
     /*** Inner function section goes below: ***/
 
 
-    void ApplyWFOp(Bucket *b, unsigned int id) {
+    void ApplyWFOp(Bucket_ptr b, unsigned int id) {
         BigWord oldToggle;
-        b->toggle.FlipBit(id); // mark as worked on by thread id
+        b.b_ptr->toggle.FlipBit(id); // mark as worked on by thread id
 
         for (int i = 0; i < 2; i++) {
-            BState *oldBState = b->state.load(memory_order_relaxed);
-            BState *nextBState = new BState(*oldBState); // copy constructor, pointer assignment
-            oldToggle = b->toggle; // copy constructor using operator=
+            shared_ptr<BState> oldBState = atomic_load(&b.b_ptr->state);
+            shared_ptr<BState> nextBState(new BState(*oldBState)); // copy
+            // constructor, pointer assignment
+            oldToggle = b.b_ptr->toggle; // copy constructor using operator=
 
             for (unsigned int j = 0; j <= NUMBER_OF_THREADS; j++) {
                 if (oldToggle.TestBit(j) == nextBState->applied.TestBit(j))
@@ -257,15 +261,12 @@ class hashmap {
             }
             nextBState->applied = oldToggle; // copy constructor using operator=
 
-            if (atomic_compare_exchange_weak<BState *>(&b->state, &oldBState, nextBState)) {
-                //   delete oldBState; // fix this
-            } else {
-                    delete nextBState;
-            }
+            atomic_compare_exchange_weak(&b.b_ptr->state,
+                    &oldBState, nextBState);
         }
     }
 
-    Status_type ExecOnBucket(BState *b, Operation const &op) {
+    Status_type ExecOnBucket(shared_ptr<BState> b, Operation const &op) {
 
         int freeID = b->BucketAvailability();
         if (freeID == FULL_BUCKET) {
@@ -294,20 +295,23 @@ class hashmap {
         return TRUE;
     }
 
-    Bucket **SplitBucket(Bucket *const b) { // returns 2 new Buckets
-        const BState *const bs = b->state.load(memory_order_relaxed);
+    shared_ptr<Bucket_ptr[]> SplitBucket(Bucket_ptr const b) { // returns 2 new Buckets
+        const shared_ptr<BState> bs = atomic_load(&b.b_ptr->state);
         // init and allocate 2 Buckets:
-        Bucket **res = new Bucket *[2];
-        BState *const bs0 = new BState(bs->results, b->toggle); // special constructor
-        BState *const bs1 = new BState(bs->results, b->toggle);
-        res[0] = new Bucket((b->prefix << 1) + 0, b->depth + 1, bs0, b->toggle);
-        res[1] = new Bucket((b->prefix << 1) + 1, b->depth + 1, bs1, b->toggle);
+        shared_ptr<Bucket_ptr[]> res(new Bucket_ptr[2]);
+        shared_ptr<BState> bs0(new BState(bs->results, b.b_ptr->toggle));
+        // special constructor
+        shared_ptr<BState> bs1(new BState(bs->results, b.b_ptr->toggle));
+        shared_ptr<Bucket> res0(new Bucket((b.b_ptr->prefix << 1) + 0, b.b_ptr->depth + 1, bs0, b.b_ptr->toggle));
+        shared_ptr<Bucket> res1(new Bucket((b.b_ptr->prefix << 1) + 1, b.b_ptr->depth + 1, bs1, b.b_ptr->toggle));
+        res[0].b_ptr = res0;
+        res[1].b_ptr = res1;
 
         // split the items between the next buckets:
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             assert(bs->items[i].valid_item); // bucket should be full for splitting
             bool inserted_ok = false; // here for debugging
-            if (Prefix(bs->items[i].hash, res[0]->depth) == res[0]->prefix)
+            if (Prefix(bs->items[i].hash, res[0].b_ptr->depth) == res[0].b_ptr->prefix)
                 inserted_ok = bs0->InsertItem(bs->items[i]);
             else
                 inserted_ok = bs1->InsertItem(bs->items[i]);
@@ -316,16 +320,16 @@ class hashmap {
         return res;
     }
 
-    void DirectoryUpdate(DState &d, Bucket *const *blist, Bucket *const old_bucket) {
+    void DirectoryUpdate(DState &d, shared_ptr<Bucket_ptr[]> blist, Bucket_ptr const old_bucket) {
         int b_index = 0;
-        if (blist[b_index]->depth > d.depth) d.EnlargeDir();
+        if (blist[b_index].b_ptr->depth > d.depth) d.EnlargeDir();
         for (size_t e = 0; e < POW(d.depth); ++e) {
             // TODO: maybe use old_bucket somehow instead of moving one by one from zero?
-            if (Prefix(e, blist[b_index]->depth, d.depth) == blist[b_index]->prefix) {
-                assert(d.dir[e]->state.load(memory_order_relaxed)->BucketAvailability() == FULL_BUCKET);
-                assert(old_bucket == d.dir[e]);
+            if (Prefix(e, blist[b_index].b_ptr->depth, d.depth) == blist[b_index].b_ptr->prefix) {
+                assert(atomic_load(&d.dir[e].b_ptr->state)->BucketAvailability() == FULL_BUCKET);
+                //assert(old_bucket == d.dir[e]);
                 d.dir[e] = blist[b_index];
-                if (e + 1 < POW(d.depth) && Prefix(e + 1, blist[b_index]->depth, d.depth) != blist[b_index]->prefix) {
+                if (e + 1 < POW(d.depth) && Prefix(e + 1, blist[b_index].b_ptr->depth, d.depth) != blist[b_index].b_ptr->prefix) {
                     if (b_index == 0) b_index++; // blist[1] will always be right after blist[0]
                     else break; // early stop
                 }
@@ -337,18 +341,16 @@ class hashmap {
         for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
             Operation const temp_help_j = help[j]; // assignment constructor
             if (temp_help_j.type != NONE && Prefix(temp_help_j.hash, bFull.depth) == bFull.prefix) {
-                BState const &bs = *(bFull.state.load(memory_order_relaxed));
+                BState const &bs = *(atomic_load(&bFull.state));
                 assert(bs.results[j].seqnum >= 0 && temp_help_j.seqnum >= 0);
                 if (bs.results[j].seqnum < temp_help_j.seqnum) {
-                    Bucket *bDest = d.dir[Prefix(temp_help_j.hash, d.depth)];
-                    BState *bsDest = bDest->state.load(memory_order_relaxed);
+                    Bucket_ptr bDest = d.dir[Prefix(temp_help_j.hash, d.depth)];
+                    shared_ptr<BState> bsDest = atomic_load(&bDest.b_ptr->state);
                     while (bsDest->BucketAvailability() == FULL_BUCKET) {
-                        Bucket **const splitted = SplitBucket(bDest);
+                        shared_ptr<Bucket_ptr[]> const splitted = SplitBucket(bDest);
                         DirectoryUpdate(d, splitted, bDest);
-//                        delete bDest; // fix this
-                        delete[] splitted;
                         bDest = d.dir[Prefix(temp_help_j.hash, d.depth)];
-                        bsDest = bDest->state.load(memory_order_relaxed);
+                        bsDest = atomic_load(&bDest.b_ptr->state);
                     }
 //                    assert(help[j]->seqnum == temp_help_j->seqnum); // TODO: why this assert fails?
                     bsDest->results[j].status = ExecOnBucket(bsDest, temp_help_j);
@@ -360,25 +362,22 @@ class hashmap {
 
     void ResizeWF() {
         for (int k = 0; k < 2; ++k) {
-            DState *oldD = ht.load(memory_order_relaxed);
-            DState *nextD = new DState(*oldD);
-            assert(nextD->dir[0]);
+            shared_ptr<DState> oldD = atomic_load(&ht);
+            shared_ptr<DState> nextD(new DState(*oldD));
+            //assert(nextD->dir[0]);
 
             for (int j = 0; j < NUMBER_OF_THREADS; ++j) {
                 if (help[j].type != NONE) { // different from the paper cause we might have invalid op at help[j]
-                    Bucket *b = nextD->dir[Prefix(help[j].hash, nextD->depth)];
-                    BState const *bs = (b->state.load(memory_order_relaxed));
+                    Bucket_ptr b = nextD->dir[Prefix(help[j].hash, nextD->depth)];
+                    shared_ptr<BState> bs = (atomic_load(&b.b_ptr->state));
                     if (bs->BucketAvailability() == FULL_BUCKET && bs->results[j].seqnum < help[j].seqnum) {
-                        ApplyPendingResize(*nextD, *b);
+                        ApplyPendingResize(*nextD, *b.b_ptr);
                     }
                 }
             }
 
-            if (atomic_compare_exchange_weak<DState *>(&ht, &oldD, nextD)) {
+            if (atomic_compare_exchange_weak(&ht, &oldD, nextD))
                 return;
-            } else {
-                delete nextD;
-            }
         }
     }
 
@@ -405,22 +404,22 @@ class hashmap {
         // this is a joint function for insert and remove
         // operation to do is in help[id]
         assert(0 <= id && id < NUMBER_OF_THREADS);
-        const BState *bstate;
+        shared_ptr<BState> bstate;
         int run_times = 0;
         do {
-            DState *htl = (ht.load(memory_order_relaxed));
+            shared_ptr<DState> htl = atomic_load(&ht);
             uint32_t hash_prefix = Prefix(hashed_key, htl->getDepth());
 
             ApplyWFOp(htl->dir[hash_prefix], id);
 
-            htl = (ht.load(memory_order_relaxed));
-            bstate = htl->dir[hash_prefix]->state.load(memory_order_relaxed);
+            htl = atomic_load(&ht);
+            bstate = atomic_load(&htl->dir[hash_prefix].b_ptr->state);
             assert(bstate->results[id].seqnum >= 0 && opSeqnum[id] >= 0);
             if (bstate->results[id].seqnum != opSeqnum[id])
                 ResizeWF();
 
-            htl = ht.load(memory_order_relaxed);
-            bstate = htl->dir[Prefix(hashed_key, htl->getDepth())]->state.load(memory_order_relaxed);
+            htl = atomic_load(&ht);
+            bstate = atomic_load(&htl->dir[Prefix(hashed_key, htl->getDepth())].b_ptr->state);
             ++run_times;
         }
         while (bstate->results[id].seqnum != opSeqnum[id]);
@@ -431,7 +430,7 @@ class hashmap {
 public:
 
     hashmap() {
-        ht.store(new DState(), memory_order_relaxed);
+        atomic_store(&ht, make_shared<DState>());
         for (unsigned long long &i : opSeqnum) i = 0;
 //        for (Operation &op : help) op.type = NONE;
     };
@@ -440,18 +439,14 @@ public:
 
     hashmap operator=(hashmap) = delete;
 
-    ~hashmap() {
-        DState *d = ht.load(memory_order_relaxed);
-        // fix this
-        delete d;
-    }
+    ~hashmap() = default;
 
     std::pair<bool, Value> lookup(Key const &key) const &{
         const void *kptr = &key;
         xxh::hash_t<32> hashed_key(xxh::xxhash<32>(kptr, sizeof(Key)));
-        DState *htl = (ht.load(memory_order_relaxed));
+        shared_ptr<DState> htl = atomic_load(&ht);
         size_t hash_prefix = Prefix(hashed_key, htl->getDepth());
-        BState const *bs = htl->dir[hash_prefix]->state.load(memory_order_relaxed);
+        shared_ptr<BState> bs = atomic_load(&htl->dir[hash_prefix].b_ptr->state);
         for (Triple t : bs->items) {
             if (t.valid_item && t.key == key) return {true, t.value};
         }
@@ -469,18 +464,18 @@ public:
 
     void DebugPrintDir() const {
         std::cout << std::endl;
-        auto htl = ht.load(memory_order_relaxed);
+        auto htl = atomic_load(&ht);
         for (int i = 0; i < POW(htl->depth); i++) {
-            BState *bs = htl->dir[i]->state.load(memory_order_relaxed);
+            BState *bs = atomic_load(&htl->dir[i].b_ptr->state);
             std::cout << "Entries: [" << i << ",";
             while (i + 1 < POW(htl->depth) && htl->dir[i] == htl->dir[i + 1])
                 i++;
             if (i + 1 < POW(htl->depth))
-                assert(htl->dir[i]->depth != htl->dir[i + 1]->depth ||
-                       htl->dir[i]->prefix != htl->dir[i + 1]->prefix);
+                assert(htl->dir[i].b_ptr->depth != htl->dir[i + 1].b_ptr->depth ||
+                       htl->dir[i].b_ptr->prefix != htl->dir[i + 1].b_ptr->prefix);
             std::cout << i << "]\tpoints to bucket with prefix: ";
-            for (int k = htl->dir[i]->depth - 1; k >= 0; --k)
-                std::cout << ((htl->dir[i]->prefix >> k) & 1);
+            for (int k = htl->dir[i].b_ptr->depth - 1; k >= 0; --k)
+                std::cout << ((htl->dir[i].b_ptr->prefix >> k) & 1);
             std::cout << ".\tItems: " << std::endl;
             for (int j = 0; j < BUCKET_SIZE; j++) {
                 if (bs->items[j] != nullptr) {
