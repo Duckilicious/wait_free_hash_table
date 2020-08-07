@@ -70,6 +70,7 @@ int main()  {
     p = ht.lookup(312);
     if(!p.first)
         std::cout << "Item was removed successfully";
+    return 0;
 }
 ```
 
