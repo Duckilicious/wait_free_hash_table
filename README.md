@@ -71,7 +71,7 @@ int main()  {
     if(!p.first)
         std::cout << "Item was removed successfully";
 }
-
+'''
 #### Benchmarks
 
 Coming soon.
