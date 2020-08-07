@@ -24,6 +24,8 @@ For a more detailed explaniation please read the the paper linked above.
 
 The following picture is taken from the paper, and demonstrate the case of resizing:
 
+![resize_example](https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/resize_example.PNG)
+
 #### Differnces from the paper
 There are two main differnce in our implementation than what the paper describes the first is in the end of the operations insert/delete we don't return the value of the status in the result array in BState, but instead we check if the seqnum in the relevant result array slot is the same as the one in OperationSeqnum. 
 We found that without this we get false positives on failed operation.
