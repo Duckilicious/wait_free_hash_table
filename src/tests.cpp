@@ -148,9 +148,10 @@ void test04() {
         td[id] = {id, &m, 90000, -1};
         int rc = pthread_create(&threads[id], nullptr, thead_function, (void *) &td[id]);
         assert(rc == 0); // Error: unable to create thread
-        int ret = pthread_join(threads[id], nullptr);
-        assert(ret == 0);
+//                assert(ret == 0);
     }
+      int ret = pthread_join(threads[1], nullptr);
+
     for (int id = 0; id < num_threads; ++id) {
         for (int j = 0; j < td[id].number_to_insert; ++j) {
             std::pair<bool, int> t = m.lookup(KEY(id, j));
