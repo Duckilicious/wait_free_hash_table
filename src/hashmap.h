@@ -2,7 +2,7 @@
 #define EWRHT_HASHMAP_H
 
 #define BUCKET_SIZE (50)
-#define NUMBER_OF_THREADS (64)
+#define NUMBER_OF_THREADS (128)
 #define NOT_FOUND (-1)
 #define FULL_BUCKET (-1)
 #define BIGWORD_SIZE (16 * 8)
@@ -247,7 +247,7 @@ class hashmap {
             for (unsigned int j = 0; j <= NUMBER_OF_THREADS; j++) {
                 if (oldToggle.TestBit(j) == nextBState->applied.TestBit(j))
                     continue;
-                assert(nextBState->results[j].seqnum >= 0 && help[j].seqnum > 0);
+                //assert(nextBState->results[j].seqnum >= 0 && help[j].seqnum > 0);
                 if (nextBState->results[j].seqnum < help[j].seqnum) {
                     nextBState->results[j].status = ExecOnBucket(nextBState, help[j]);
                     if (nextBState->results[j].status != FAIL)
