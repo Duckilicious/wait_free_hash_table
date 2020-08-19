@@ -33,12 +33,12 @@ void *thread_function(void *threadarg) {
     uint64_t lookup_id = 0; 
     while (!start_the_threads_global_flag);
     start = std::clock();
-    while((std::clock() - start) / ((double) CLOCKS_PER_SEC) <= (60 * params->num_of_threads)){
-        for (int i = 0; i < 1; ++i) {
+    while((std::clock() - start) / ((double) CLOCKS_PER_SEC) <= (30 * params->num_of_threads)){
+        for (int i = 0; i < 5; ++i) {
             bool st = m.insert(KEY(insert_id, i),KEY(insert_id++, i), id);
             params->number_of_insert_ops++;
         }
-        for (int i = 0; i < 9; ++i) {
+        for (int i = 0; i < 5; ++i) {
             std::pair<bool, int> t = m.lookup(KEY(lookup_id++, i));
             params->number_of_lookup_ops++;
         }
