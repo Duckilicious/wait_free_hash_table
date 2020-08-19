@@ -1,3 +1,6 @@
 [submodule "c_impl/xxHash"]
 	path = c_impl/xxHash
 	url = https://github.com/Cyan4973/xxHash.git
+[submodule "benchmarks/libcukoo/libcuckoo"]
+	path = benchmarks/libcukoo/libcuckoo
+	url = https://github.com/efficient/libcuckoo.git
