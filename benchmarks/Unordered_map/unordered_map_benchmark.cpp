@@ -40,11 +40,11 @@ void *thread_function(void *threadarg) {
     start = std::clock();
     while((std::clock() - start) / ((double) CLOCKS_PER_SEC) <= (30 * params->num_of_threads)){
         while (lock.test_and_set(std::memory_order_acquire));  // acquire lock
-        for (int i = 0; i < 1; ++i) {
+        for (int i = 0; i < 5; ++i) {
             m.insert(make_pair(KEY(insert_id, i),KEY(insert_id++, i)));
             params->number_of_insert_ops++;
         }
-        for (int i = 0; i < 9; ++i) {
+        for (int i = 0; i < 5; ++i) {
             m.find(KEY(lookup_id++,i));
             params->number_of_lookup_ops++;
         }
