@@ -79,7 +79,7 @@ int main()  {
 We tested the DS against two other hash maps; the [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_map) and the [libcukoo](https://github.com/efficient/libcuckoo). The platform we used has 2 AMD EPYC 7551 32-Core Processor, and 64 HW threads at a 2.0GHz base clock speed. Total L3 Cache: 64MB.
 We ran the benchmarks on two main cases: a) 1:1 insert-lookup ratio. b) 1:9 insert-lookup ratio.
 
-<img src="https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/benchmark_graphs/1_1_ratio_cukoo.jpg" alt="drawing" width="450"/><img src="https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/benchmark_graphs/1_1_ratio_std.jpg" alt="drawing" width="450"/>
+<img src="https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/benchmark_graphs/1_1_ratio_cukoo.jpg" alt="drawing" width="400"/><img src="https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/benchmark_graphs/1_1_ratio_std.jpg" alt="drawing" width="400"/>
 
-<img src="https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/benchmark_graphs/1_9_ratio_cukoo.jpg" alt="drawing" width="450"/><img src="https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/benchmark_graphs/1_9_ratio_std.jpg" alt="drawing" width="450"/>
+<img src="https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/benchmark_graphs/1_9_ratio_cukoo.jpg" alt="drawing" width="400"/><img src="https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/benchmark_graphs/1_9_ratio_std.jpg" alt="drawing" width="400"/>
 
