@@ -40,7 +40,7 @@ We used shared_ptr and it's array functionality in C++ 17 and also [XXhash](http
 
 #### Compiling
 
-to compile this project including our tests simply run in the src/ folder:
+To compile this project including our tests simply run in the src/ folder:
 
 ```sh 
 $ g++ -pthread -std=c++17 tests.cpp
@@ -76,5 +76,10 @@ int main()  {
 
 #### Benchmarks
 
-Coming soon.
+We tested the DS against two other hash maps; the [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_map) and the [libcukoo](https://github.com/efficient/libcuckoo). The platform we used has 2 AMD EPYC 7551 32-Core Processor, and 64 HW threads at a 2.0GHz base clock speed. Total L3 Cache: 64MB.
+We ran the benchmarks on two main cases: a) 1:1 insert-lookup ratio. b) 1:9 insert-lookup ratio.
+
+<img src="https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/benchmark_graphs/1_1_ratio_cukoo.jpg" alt="drawing" width="450"/><img src="https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/benchmark_graphs/1_1_ratio_std.jpg" alt="drawing" width="450"/>
+
+<img src="https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/benchmark_graphs/1_9_ratio_cukoo.jpg" alt="drawing" width="450"/><img src="https://github.com/Duckilicious/wait_free_hash_table/blob/master/images/benchmark_graphs/1_9_ratio_std.jpg" alt="drawing" width="450"/>
 
